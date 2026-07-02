@@ -1,0 +1,3379 @@
+openapi: 3.0.0
+info:
+  title: RightSteps Homework API
+  version: 1.0.0
+  description: |
+    Homework module for the RightSteps platform.
+
+    **Roles:**
+    - `TUTOR` — create drafts, assign, grade, revert homework
+    - `PARENT` — view child homework, save/submit answers on child's behalf, browse and purchase question bank access via cart
+    - `ADMIN` — manage the question bank
+
+    **Homework Lifecycle:**
+    1. Tutor checks eligibility (`can-assign`)
+    2. Tutor creates a `DRAFT` (`POST /homework`)
+    3. Tutor adds questions (`POST /homework/{id}/questions`)
+    4. Tutor assigns to child (`POST /homework/{id}/assign`) → `ASSIGNED`
+    5. Parent saves child's answers (`draft`) → `IN_PROGRESS`
+    6. Parent submits (`submit`) → `SUBMITTED`; MCQ auto-scored, written answers AI-graded async
+    7. Tutor grades overall (`grade`) → `COMPLETED`
+    8. Optionally tutor reverts questions (`revert`) → `REVERTED`; child resubmits (`resubmit`)
+
+servers:
+  - url: http://localhost:5000/v1
+    description: Local development
+  - url: https://api.rightsteps.app/v1
+    description: Production
+
+tags:
+  - name: Homework — Tutor
+    description: Create, assign, grade, and manage homework
+  - name: Homework — Child
+    description: Child homework (accessed via authenticated parent)
+  - name: Homework — Parent
+    description: Parent view of child homework and question bank pricing
+  - name: Homework — Question Bank
+    description: Browse published bank questions (active subscription required)
+  - name: Homework — Parent Marketplace
+    description: Parent browse, purchase, and cart flow for the question bank
+  - name: Homework — Admin
+    description: Admin endpoints for managing the question bank
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Pagination:
+      type: object
+      properties:
+        total:
+          type: integer
+          example: 42
+        page:
+          type: integer
+          example: 1
+        limit:
+          type: integer
+          example: 10
+        hasNextPage:
+          type: boolean
+          example: true
+
+    SubTopicFlat:
+      type: object
+      description: Flat subtopic item as returned in homework detail (order + subtopic fields merged)
+      properties:
+        order:
+          type: integer
+          example: 1
+        id:
+          type: string
+          example: cmst1abc0001r4ujxiqej3no
+        name:
+          type: string
+          example: Linear Equations
+        code:
+          type: string
+          example: ALG-01
+
+    HomeworkAnswer:
+      type: object
+      properties:
+        id:
+          type: string
+        textAnswer:
+          type: string
+          nullable: true
+        selectedOption:
+          type: string
+          nullable: true
+        matchAnswer:
+          type: object
+          nullable: true
+          additionalProperties:
+            type: string
+        orderAnswer:
+          type: array
+          items:
+            type: string
+        imageUploadIds:
+          type: array
+          items:
+            type: string
+        isDraft:
+          type: boolean
+        isSkipped:
+          type: boolean
+        isCorrect:
+          type: boolean
+          nullable: true
+        aiGrade:
+          type: string
+          nullable: true
+          enum: [OUTSTANDING, GOOD, SATISFACTORY, NEEDS_IMPROVEMENT]
+        aiFeedback:
+          type: string
+          nullable: true
+        tutorGrade:
+          type: string
+          nullable: true
+          enum: [OUTSTANDING, GOOD, SATISFACTORY, NEEDS_IMPROVEMENT]
+        tutorFeedback:
+          type: string
+          nullable: true
+        submittedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    TutorHomeworkQuestion:
+      type: object
+      description: Question in tutor view — includes modelAnswer, correctOption, and objective details
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [MULTIPLE_CHOICE, SHORT_ANSWER, LONG_ANSWER, FILL_BLANK, MATCH, TRUE_FALSE, ORDERING, READING_COMPREHENSION, VIDEO]
+        questionText:
+          type: string
+        modelAnswer:
+          type: string
+          nullable: true
+        options:
+          type: array
+          items:
+            type: string
+        correctOption:
+          type: string
+          nullable: true
+        matchPairs:
+          type: object
+          nullable: true
+          additionalProperties:
+            type: string
+        orderItems:
+          type: array
+          items:
+            type: string
+        blankAnswers:
+          type: array
+          items:
+            type: string
+        passage:
+          type: string
+          nullable: true
+        videoUrl:
+          type: string
+          nullable: true
+        videoNote:
+          type: string
+          nullable: true
+        imageUploadIds:
+          type: array
+          items:
+            type: string
+        examBoard:
+          type: string
+          nullable: true
+          enum: [EDEXCEL, AQA, OCR, WJEC, CAMBRIDGE, IB, NONE]
+        level:
+          type: string
+          nullable: true
+          enum: [KS3, GCSE, A_LEVEL, ELEVEN_PLUS, SATS]
+        difficulty:
+          type: string
+          nullable: true
+          enum: [FOUNDATION, STANDARD, HIGHER, STRETCH]
+        isReverted:
+          type: boolean
+        revertNote:
+          type: string
+          nullable: true
+        order:
+          type: integer
+        isFromBank:
+          type: boolean
+        objectiveId:
+          type: string
+          nullable: true
+          description: FK to CurriculumObjective (cuid)
+        objectiveCode:
+          type: string
+          nullable: true
+          description: Human-readable objective code e.g. ALG-01-1. Present when objectiveId is set.
+          example: ALG-01-1
+        learningObjective:
+          type: string
+          nullable: true
+          description: Full objective text. Present when objectiveId is set.
+        answers:
+          type: array
+          items:
+            $ref: '#/components/schemas/HomeworkAnswer'
+
+    ChildHomeworkQuestion:
+      type: object
+      description: Question in child/parent view — no modelAnswer or correctOption
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [MULTIPLE_CHOICE, SHORT_ANSWER, LONG_ANSWER, FILL_BLANK, MATCH, TRUE_FALSE, ORDERING, READING_COMPREHENSION, VIDEO]
+        questionText:
+          type: string
+        passage:
+          type: string
+          nullable: true
+        videoUrl:
+          type: string
+          nullable: true
+        videoNote:
+          type: string
+          nullable: true
+        imageUploadIds:
+          type: array
+          items:
+            type: string
+        options:
+          type: array
+          items:
+            type: string
+        matchPairs:
+          type: object
+          nullable: true
+          additionalProperties:
+            type: string
+        orderItems:
+          type: array
+          items:
+            type: string
+        blankAnswers:
+          type: array
+          items:
+            type: string
+        examBoard:
+          type: string
+          nullable: true
+          enum: [EDEXCEL, AQA, OCR, WJEC, CAMBRIDGE, IB, NONE]
+        level:
+          type: string
+          nullable: true
+          enum: [KS3, GCSE, A_LEVEL, ELEVEN_PLUS, SATS]
+        difficulty:
+          type: string
+          nullable: true
+          enum: [FOUNDATION, STANDARD, HIGHER, STRETCH]
+        isReverted:
+          type: boolean
+        revertNote:
+          type: string
+          nullable: true
+        order:
+          type: integer
+        answers:
+          type: array
+          items:
+            $ref: '#/components/schemas/HomeworkAnswer'
+
+    TutorHomeworkDetail:
+      type: object
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum: [DRAFT, ASSIGNED, IN_PROGRESS, SUBMITTED, REVERTED, COMPLETED, MISSED, CANCELLED]
+        deadline:
+          type: string
+          format: date-time
+          nullable: true
+        instructions:
+          type: string
+          nullable: true
+        estimatedMinutes:
+          type: integer
+          nullable: true
+        score:
+          type: number
+          nullable: true
+        scoreOutOf:
+          type: number
+          nullable: true
+        aiGrade:
+          type: string
+          nullable: true
+          enum: [OUTSTANDING, GOOD, SATISFACTORY, NEEDS_IMPROVEMENT]
+        tutorGrade:
+          type: string
+          nullable: true
+          enum: [OUTSTANDING, GOOD, SATISFACTORY, NEEDS_IMPROVEMENT]
+        aiFeedback:
+          type: string
+          nullable: true
+        tutorFeedback:
+          type: string
+          nullable: true
+        parentNote:
+          type: string
+          nullable: true
+        revertCount:
+          type: integer
+        submittedAt:
+          type: string
+          format: date-time
+          nullable: true
+        revertedAt:
+          type: string
+          format: date-time
+          nullable: true
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        cancelledAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        child:
+          type: object
+          properties:
+            id:
+              type: string
+            name:
+              type: string
+        subject:
+          type: object
+          properties:
+            id:
+              type: string
+            name:
+              type: string
+            code:
+              type: string
+        subTopics:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubTopicFlat'
+        questions:
+          type: array
+          items:
+            $ref: '#/components/schemas/TutorHomeworkQuestion'
+
+    ChildHomeworkDetail:
+      type: object
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum: [ASSIGNED, IN_PROGRESS, SUBMITTED, REVERTED, COMPLETED, MISSED, CANCELLED]
+        deadline:
+          type: string
+          format: date-time
+          nullable: true
+        instructions:
+          type: string
+          nullable: true
+        estimatedMinutes:
+          type: integer
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        submittedAt:
+          type: string
+          format: date-time
+          nullable: true
+        revertedAt:
+          type: string
+          format: date-time
+          nullable: true
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        aiGrade:
+          type: string
+          nullable: true
+          enum: [OUTSTANDING, GOOD, SATISFACTORY, NEEDS_IMPROVEMENT]
+        aiFeedback:
+          type: string
+          nullable: true
+        tutorGrade:
+          type: string
+          nullable: true
+          enum: [OUTSTANDING, GOOD, SATISFACTORY, NEEDS_IMPROVEMENT]
+        tutorFeedback:
+          type: string
+          nullable: true
+        score:
+          type: number
+          nullable: true
+        scoreOutOf:
+          type: number
+          nullable: true
+        revertCount:
+          type: integer
+        parentNote:
+          type: string
+          nullable: true
+        subject:
+          type: object
+          properties:
+            id:
+              type: string
+            name:
+              type: string
+            code:
+              type: string
+        topic:
+          type: object
+          properties:
+            id:
+              type: string
+            name:
+              type: string
+            code:
+              type: string
+        subTopics:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubTopicFlat'
+        questions:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChildHomeworkQuestion'
+
+    HomeworkListItem:
+      type: object
+      description: Homework summary in tutor list
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum: [DRAFT, ASSIGNED, IN_PROGRESS, SUBMITTED, REVERTED, COMPLETED, MISSED, CANCELLED]
+        deadline:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        submittedAt:
+          type: string
+          format: date-time
+          nullable: true
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        cancelledAt:
+          type: string
+          format: date-time
+          nullable: true
+        estimatedMinutes:
+          type: integer
+          nullable: true
+        score:
+          type: number
+          nullable: true
+        scoreOutOf:
+          type: number
+          nullable: true
+        aiGrade:
+          type: string
+          nullable: true
+          enum: [OUTSTANDING, GOOD, SATISFACTORY, NEEDS_IMPROVEMENT]
+        tutorGrade:
+          type: string
+          nullable: true
+          enum: [OUTSTANDING, GOOD, SATISFACTORY, NEEDS_IMPROVEMENT]
+        child:
+          type: object
+          properties:
+            id:
+              type: string
+            name:
+              type: string
+        subject:
+          type: object
+          properties:
+            id:
+              type: string
+            name:
+              type: string
+            code:
+              type: string
+        _count:
+          type: object
+          properties:
+            questions:
+              type: integer
+              example: 5
+
+    ChildHomeworkListItem:
+      type: object
+      description: Homework summary in child/parent list
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum: [ASSIGNED, IN_PROGRESS, SUBMITTED, REVERTED, COMPLETED, MISSED, CANCELLED]
+        deadline:
+          type: string
+          format: date-time
+          nullable: true
+        instructions:
+          type: string
+          nullable: true
+        estimatedMinutes:
+          type: integer
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        submittedAt:
+          type: string
+          format: date-time
+          nullable: true
+        revertedAt:
+          type: string
+          format: date-time
+          nullable: true
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        aiGrade:
+          type: string
+          nullable: true
+          enum: [OUTSTANDING, GOOD, SATISFACTORY, NEEDS_IMPROVEMENT]
+        tutorGrade:
+          type: string
+          nullable: true
+          enum: [OUTSTANDING, GOOD, SATISFACTORY, NEEDS_IMPROVEMENT]
+        score:
+          type: number
+          nullable: true
+        scoreOutOf:
+          type: number
+          nullable: true
+        revertCount:
+          type: integer
+        subject:
+          type: object
+          properties:
+            id:
+              type: string
+            name:
+              type: string
+            code:
+              type: string
+        _count:
+          type: object
+          properties:
+            questions:
+              type: integer
+
+    BankQuestion:
+      type: object
+      description: Published bank question (browse view — no modelAnswer or correctOption)
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [MULTIPLE_CHOICE, SHORT_ANSWER, LONG_ANSWER, FILL_BLANK, MATCH, TRUE_FALSE, ORDERING, READING_COMPREHENSION, VIDEO]
+        questionText:
+          type: string
+        examBoard:
+          type: string
+          nullable: true
+          enum: [EDEXCEL, AQA, OCR, WJEC, CAMBRIDGE, IB, NONE]
+        level:
+          type: string
+          nullable: true
+          enum: [KS3, GCSE, A_LEVEL, ELEVEN_PLUS, SATS]
+        difficulty:
+          type: string
+          nullable: true
+          enum: [FOUNDATION, STANDARD, HIGHER, STRETCH]
+        subTopicId:
+          type: string
+        objectiveId:
+          type: string
+          nullable: true
+        options:
+          type: array
+          items:
+            type: string
+        orderItems:
+          type: array
+          items:
+            type: string
+        blankAnswers:
+          type: array
+          items:
+            type: string
+        matchPairs:
+          type: object
+          nullable: true
+          additionalProperties:
+            type: string
+        imageUploadIds:
+          type: array
+          items:
+            type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    AdminBankQuestion:
+      type: object
+      description: Bank question in admin view — includes all fields
+      properties:
+        id:
+          type: string
+        subjectId:
+          type: string
+        topicId:
+          type: string
+        subTopicId:
+          type: string
+        objectiveId:
+          type: string
+          nullable: true
+        type:
+          type: string
+          enum: [MULTIPLE_CHOICE, SHORT_ANSWER, LONG_ANSWER, FILL_BLANK, MATCH, TRUE_FALSE, ORDERING, READING_COMPREHENSION, VIDEO]
+        questionText:
+          type: string
+        modelAnswer:
+          type: string
+          nullable: true
+        options:
+          type: array
+          items:
+            type: string
+        correctOption:
+          type: string
+          nullable: true
+        matchPairs:
+          type: object
+          nullable: true
+          additionalProperties:
+            type: string
+        orderItems:
+          type: array
+          items:
+            type: string
+        blankAnswers:
+          type: array
+          items:
+            type: string
+        imageUploadIds:
+          type: array
+          items:
+            type: string
+        examBoard:
+          type: string
+          nullable: true
+          enum: [EDEXCEL, AQA, OCR, WJEC, CAMBRIDGE, IB, NONE]
+        level:
+          type: string
+          nullable: true
+          enum: [KS3, GCSE, A_LEVEL, ELEVEN_PLUS, SATS]
+        difficulty:
+          type: string
+          nullable: true
+          enum: [FOUNDATION, STANDARD, HIGHER, STRETCH]
+        price:
+          type: integer
+          description: Price in pence
+          example: 99
+        isPublished:
+          type: boolean
+        isActive:
+          type: boolean
+        createdByAdminId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    AnswerInput:
+      type: object
+      required: [questionId]
+      properties:
+        questionId:
+          type: string
+        textAnswer:
+          type: string
+          nullable: true
+        selectedOption:
+          type: string
+          nullable: true
+        matchAnswer:
+          type: object
+          nullable: true
+          additionalProperties:
+            type: string
+        orderAnswer:
+          type: array
+          items:
+            type: string
+          default: []
+        imageUploadIds:
+          type: array
+          items:
+            type: string
+          default: []
+        isSkipped:
+          type: boolean
+          default: false
+
+security:
+  - BearerAuth: []
+
+paths:
+
+  /homework/tutor/sessions/{sessionId}/can-assign:
+    get:
+      tags: [Homework — Tutor]
+      summary: Check if homework can be assigned for a session
+      description: |
+        Pre-flight check before building a draft. Verifies tutor eligibility, session completion, 24-hour assignment window, and session homework limit (max 5).
+
+        Always returns `200`. `canAssign: false` is a business rejection, not an HTTP error.
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema:
+            type: string
+          example: cmq5rmgoz0001r4ujxiqej3no
+      responses:
+        '200':
+          description: Check completed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      canAssign:
+                        type: boolean
+                      reason:
+                        type: string
+                        description: Present only when canAssign is false
+                      session:
+                        type: object
+                        description: Present only when canAssign is true
+                        properties:
+                          id:
+                            type: string
+                          childId:
+                            type: string
+                          subjectId:
+                            type: string
+                          endTime:
+                            type: string
+                            format: date-time
+                      homeworkCount:
+                        type: integer
+                        description: Homeworks already linked to this session
+                      remainingSlots:
+                        type: integer
+              examples:
+                eligible:
+                  summary: Can assign
+                  value:
+                    success: true
+                    data:
+                      canAssign: true
+                      session:
+                        id: cmq5rmgoz0001r4ujxiqej3no
+                        childId: cmp1abc0001r4ujxiqej3no
+                        subjectId: cmp2def0001r4ujxiqej3no
+                        endTime: '2026-07-01T15:00:00.000Z'
+                      homeworkCount: 1
+                      remainingSlots: 4
+                notEligible:
+                  summary: Cannot assign
+                  value:
+                    success: true
+                    data:
+                      canAssign: false
+                      reason: Homework must be assigned within 24 hours of the session
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Not a tutor
+        '404':
+          description: Session not found
+
+  /homework/tutor/curriculum:
+    get:
+      tags: [Homework — Tutor]
+      summary: Browse curriculum for homework creation
+      description: |
+        Returns different shapes depending on query params:
+        - **No params** → all year groups
+        - **yearGroupId only** → subjects for that year group
+        - **yearGroupId + subjectId** → full topic / subtopic / objective tree
+      parameters:
+        - in: query
+          name: yearGroupId
+          schema:
+            type: string
+          description: Required when subjectId is also provided
+        - in: query
+          name: subjectId
+          schema:
+            type: string
+          description: Requires yearGroupId
+      responses:
+        '200':
+          description: Curriculum data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+              examples:
+                yearGroups:
+                  summary: No params — year groups
+                  value:
+                    success: true
+                    data:
+                      yearGroups:
+                        - id: cmyg1abc
+                          code: Y7
+                          name: Year 7
+                          keyStage: KS3
+                subjects:
+                  summary: yearGroupId only — subjects
+                  value:
+                    success: true
+                    data:
+                      subjects:
+                        - id: cmsub1abc
+                          code: MATHS
+                          name: Mathematics
+                          type: CORE
+                topicsTree:
+                  summary: Both params — topics tree
+                  value:
+                    success: true
+                    data:
+                      subject:
+                        id: cmsub1abc
+                        code: MATHS
+                        name: Mathematics
+                        type: CORE
+                      yearGroup:
+                        id: cmyg1abc
+                        code: Y7
+                        name: Year 7
+                        keyStage: KS3
+                      topics:
+                        - id: cmtopic1abc
+                          name: Algebra
+                          code: ALG
+                          subTopics:
+                            - id: cmst1abc
+                              name: Linear Equations
+                              code: ALG-01
+                              objectives:
+                                - id: cmobj1abc
+                                  objectiveId: ALG-01-1
+                                  learningObjective: Solve linear equations with one unknown
+                                  sequenceNumber: 1
+                                  difficulty: STANDARD
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Not a tutor or admin
+        '404':
+          description: No curriculum found for this subject and year group
+
+  /homework:
+    post:
+      tags: [Homework — Tutor]
+      summary: Create a homework draft
+      description: |
+        Creates a `DRAFT` homework. Not visible to children until assigned.
+        Next step: `POST /homework/{homeworkId}/questions`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subjectId, topicId]
+              properties:
+                subjectId:
+                  type: string
+                topicId:
+                  type: string
+                subTopicIds:
+                  type: array
+                  items:
+                    type: string
+                  description: Optional subtopic tags for the homework (min 1 if provided)
+                instructions:
+                  type: string
+                  example: Show all working
+                estimatedMinutes:
+                  type: integer
+                  minimum: 1
+                  example: 30
+            example:
+              subjectId: cmsub1abc0001r4ujxiqej3no
+              topicId: cmtopic1abc0001r4ujxiqej3no
+              subTopicIds: [cmst1abc0001r4ujxiqej3no]
+              instructions: Complete all questions
+              estimatedMinutes: 30
+      responses:
+        '201':
+          description: Draft created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                      status:
+                        type: string
+                        example: DRAFT
+                      subjectId:
+                        type: string
+                      topicId:
+                        type: string
+                      instructions:
+                        type: string
+                        nullable: true
+                      estimatedMinutes:
+                        type: integer
+                        nullable: true
+                      createdAt:
+                        type: string
+                        format: date-time
+        '400':
+          description: Validation error or subject/topic not found
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Not a tutor
+
+  /homework/{homeworkId}/questions:
+    post:
+      tags: [Homework — Tutor]
+      summary: Add questions to a draft
+      description: |
+        Appends questions to a `DRAFT` homework (can call multiple times, max 20 total).
+
+        Each item is either:
+        - **Bank question** — provide `bankQuestionId` + `order`. Content is copied from the bank. Requires active homework subscription.
+        - **Custom question** — provide `type`, `questionText`, `order`, and type-specific fields.
+      parameters:
+        - in: path
+          name: homeworkId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [questions]
+              properties:
+                questions:
+                  type: array
+                  minItems: 1
+                  maxItems: 10
+                  items:
+                    type: object
+                    required: [order]
+                    properties:
+                      bankQuestionId:
+                        type: string
+                        description: Provide for bank questions; omit all other content fields
+                      type:
+                        type: string
+                        enum: [MULTIPLE_CHOICE, SHORT_ANSWER, LONG_ANSWER, FILL_BLANK, MATCH, TRUE_FALSE, ORDERING, READING_COMPREHENSION, VIDEO]
+                        description: Required for custom questions
+                      questionText:
+                        type: string
+                        description: Required for custom questions
+                      modelAnswer:
+                        type: string
+                        nullable: true
+                      passage:
+                        type: string
+                        nullable: true
+                        description: For READING_COMPREHENSION
+                      videoUploadId:
+                        type: string
+                        nullable: true
+                      videoUrl:
+                        type: string
+                        format: uri
+                        nullable: true
+                      videoNote:
+                        type: string
+                        nullable: true
+                      imageUploadIds:
+                        type: array
+                        items:
+                          type: string
+                        default: []
+                      options:
+                        type: array
+                        items:
+                          type: string
+                        description: Required for MULTIPLE_CHOICE and TRUE_FALSE
+                      correctOption:
+                        type: string
+                        nullable: true
+                        description: Required for MULTIPLE_CHOICE and TRUE_FALSE
+                      matchPairs:
+                        type: object
+                        nullable: true
+                        additionalProperties:
+                          type: string
+                        description: Required for MATCH
+                      orderItems:
+                        type: array
+                        items:
+                          type: string
+                        description: Required for ORDERING (min 2 items)
+                      blankAnswers:
+                        type: array
+                        items:
+                          type: string
+                        description: Required for FILL_BLANK
+                      examBoard:
+                        type: string
+                        nullable: true
+                        enum: [EDEXCEL, AQA, OCR, WJEC, CAMBRIDGE, IB, NONE]
+                      level:
+                        type: string
+                        nullable: true
+                        enum: [KS3, GCSE, A_LEVEL, ELEVEN_PLUS, SATS]
+                      difficulty:
+                        type: string
+                        nullable: true
+                        enum: [FOUNDATION, STANDARD, HIGHER, STRETCH]
+                      order:
+                        type: integer
+                        minimum: 1
+                      subTopicId:
+                        type: string
+                        nullable: true
+                      objectiveId:
+                        type: string
+                        nullable: true
+            examples:
+              bankQuestion:
+                summary: From question bank
+                value:
+                  questions:
+                    - bankQuestionId: cmq5rmgoz0001r4ujxiqej3no
+                      order: 1
+              customMcq:
+                summary: Custom MCQ
+                value:
+                  questions:
+                    - type: MULTIPLE_CHOICE
+                      questionText: What is the value of x in 2x = 10?
+                      options: ['3', '4', '5', '6']
+                      correctOption: '5'
+                      order: 1
+      responses:
+        '201':
+          description: Questions added
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      questions:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: string
+                            type:
+                              type: string
+                            questionText:
+                              type: string
+                            order:
+                              type: integer
+                            isFromBank:
+                              type: boolean
+        '400':
+          description: Homework not DRAFT, question limit exceeded, or validation error
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Not a tutor or subscription required for bank questions
+        '404':
+          description: Homework or bank question not found
+
+  /homework/{homeworkId}/assign:
+    post:
+      tags: [Homework — Tutor]
+      summary: Assign draft to a child
+      description: |
+        Creates a new `ASSIGNED` homework record by copying the draft's questions and subtopics to a new record linked to the child.
+
+        **Validations:**
+        - Draft must have at least 1 question
+        - Child must have had at least one session with this tutor
+        - Deadline must be at least 24 hours from now
+        - No overlapping subtopics assigned to this child in the last 7 days
+        - If `sessionId` provided: session must be `COMPLETED` and within assignment window
+
+        The original draft is unchanged and can be reassigned to other children.
+      parameters:
+        - in: path
+          name: homeworkId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [childId, deadline]
+              properties:
+                childId:
+                  type: string
+                sessionId:
+                  type: string
+                  nullable: true
+                  description: Optional — link to a specific completed session
+                deadline:
+                  type: string
+                  format: date-time
+                  description: Must be at least 24 hours from now
+                  example: '2026-07-10T23:59:59.000Z'
+      responses:
+        '201':
+          description: Homework assigned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                      status:
+                        type: string
+                        example: ASSIGNED
+                      childId:
+                        type: string
+                      sessionId:
+                        type: string
+                        nullable: true
+                      deadline:
+                        type: string
+                        format: date-time
+        '400':
+          description: Deadline too soon, minimum questions not met, or session not completed
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Child not associated with this tutor
+        '404':
+          description: Homework or child not found
+        '409':
+          description: Overlapping subtopics already assigned to child within last 7 days
+
+  /homework/{homeworkId}/cancel:
+    post:
+      tags: [Homework — Tutor]
+      summary: Cancel assigned or in-progress homework
+      description: Marks the homework `CANCELLED`. Only works on `ASSIGNED` or `IN_PROGRESS` status.
+      parameters:
+        - in: path
+          name: homeworkId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Homework cancelled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                      status:
+                        type: string
+                        example: CANCELLED
+                      cancelledAt:
+                        type: string
+                        format: date-time
+        '400':
+          description: Homework is not ASSIGNED or IN_PROGRESS
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Not a tutor
+        '404':
+          description: Homework not found
+
+  /homework/{homeworkId}/delete-draft:
+    post:
+      tags: [Homework — Tutor]
+      summary: Delete a draft homework
+      description: Permanently deletes a `DRAFT` homework and all its questions. Only works on DRAFT status.
+      parameters:
+        - in: path
+          name: homeworkId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Draft deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      deleted:
+                        type: boolean
+                        example: true
+        '400':
+          description: Homework is not DRAFT
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Not a tutor
+        '404':
+          description: Homework not found
+
+  /homework/{homeworkId}/grade:
+    post:
+      tags: [Homework — Tutor]
+      summary: Grade a submitted homework
+      description: |
+        Sets overall tutor grade and optional per-question grades. Transitions homework to `COMPLETED`.
+
+        Requires active homework subscription. Only works on `SUBMITTED` status.
+      parameters:
+        - in: path
+          name: homeworkId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tutorGrade]
+              properties:
+                tutorGrade:
+                  type: string
+                  enum: [OUTSTANDING, GOOD, SATISFACTORY, NEEDS_IMPROVEMENT]
+                tutorFeedback:
+                  type: string
+                  nullable: true
+                questionGrades:
+                  type: array
+                  default: []
+                  items:
+                    type: object
+                    required: [questionId, tutorGrade]
+                    properties:
+                      questionId:
+                        type: string
+                      tutorGrade:
+                        type: string
+                        enum: [OUTSTANDING, GOOD, SATISFACTORY, NEEDS_IMPROVEMENT]
+                      tutorFeedback:
+                        type: string
+                        nullable: true
+            example:
+              tutorGrade: GOOD
+              tutorFeedback: Great effort on algebra section
+              questionGrades:
+                - questionId: cmqst0001r4ujxiqej3no
+                  tutorGrade: OUTSTANDING
+                  tutorFeedback: Perfect working shown
+      responses:
+        '200':
+          description: Homework graded and completed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                      status:
+                        type: string
+                        example: COMPLETED
+                      tutorGrade:
+                        type: string
+                        enum: [OUTSTANDING, GOOD, SATISFACTORY, NEEDS_IMPROVEMENT]
+                      tutorFeedback:
+                        type: string
+                        nullable: true
+                      completedAt:
+                        type: string
+                        format: date-time
+        '400':
+          description: Homework not SUBMITTED or invalid question IDs
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Active homework subscription required
+        '404':
+          description: Homework not found
+
+  /homework/{homeworkId}/revert:
+    post:
+      tags: [Homework — Tutor]
+      summary: Revert specific questions for the child to redo
+      description: |
+        Marks questions `isReverted: true` with a note. Transitions homework to `REVERTED`. Child must resubmit only the reverted questions.
+
+        Requires active homework subscription. Only works on `SUBMITTED` status.
+      parameters:
+        - in: path
+          name: homeworkId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [questions]
+              properties:
+                questions:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    required: [questionId, revertNote]
+                    properties:
+                      questionId:
+                        type: string
+                      revertNote:
+                        type: string
+                        minLength: 1
+                        example: Show your full working for this question.
+            example:
+              questions:
+                - questionId: cmqst0001r4ujxiqej3no
+                  revertNote: Your answer was incomplete — show your working.
+      responses:
+        '200':
+          description: Questions reverted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                      status:
+                        type: string
+                        example: REVERTED
+                      revertCount:
+                        type: integer
+                        example: 1
+                      revertedAt:
+                        type: string
+                        format: date-time
+        '400':
+          description: Homework not SUBMITTED or invalid question IDs
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Active homework subscription required
+        '404':
+          description: Homework not found
+
+  /homework/tutor:
+    get:
+      tags: [Homework — Tutor]
+      summary: List tutor's homeworks
+      description: Paginated list of all homeworks created by this tutor (drafts and assigned). Filterable by status, subject, and child.
+      parameters:
+        - in: query
+          name: page
+          schema:
+            type: integer
+            default: 1
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 10
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [DRAFT, ASSIGNED, IN_PROGRESS, SUBMITTED, REVERTED, COMPLETED, MISSED, CANCELLED]
+        - in: query
+          name: subjectId
+          schema:
+            type: string
+        - in: query
+          name: childId
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Paginated list of homeworks
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      homeworks:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/HomeworkListItem'
+                      pagination:
+                        $ref: '#/components/schemas/Pagination'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Not a tutor
+
+  /homework/tutor/{homeworkId}:
+    get:
+      tags: [Homework — Tutor]
+      summary: Get homework detail (tutor view)
+      description: |
+        Full homework detail with all questions (including modelAnswer, correctOption, objectiveCode, learningObjective) and all submitted answers with AI and tutor grades.
+
+        `subTopics` is a flat array — each item has `order`, `id`, `name`, `code` directly (no nested `subTopic` wrapper).
+      parameters:
+        - in: path
+          name: homeworkId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Homework detail
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: '#/components/schemas/TutorHomeworkDetail'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Not a tutor
+        '404':
+          description: Homework not found
+
+  /homework/child/{childId}:
+    get:
+      tags: [Homework — Child]
+      summary: List homework assigned to a child
+      description: Returns all non-draft homework for the child. Authenticated user must be the child's parent.
+      parameters:
+        - in: path
+          name: childId
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: page
+          schema:
+            type: integer
+            default: 1
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 10
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [ASSIGNED, IN_PROGRESS, SUBMITTED, REVERTED, COMPLETED, MISSED, CANCELLED]
+      responses:
+        '200':
+          description: Paginated list of child's homeworks
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      homeworks:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/ChildHomeworkListItem'
+                      pagination:
+                        $ref: '#/components/schemas/Pagination'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Not a parent
+        '404':
+          description: Child not found
+
+  /homework/child/{childId}/{homeworkId}:
+    get:
+      tags: [Homework — Child]
+      summary: Get homework detail (child view)
+      description: |
+        Full homework detail visible to the child — questions with the child's saved/submitted answers. Does NOT include modelAnswer or correctOption.
+
+        `subTopics` is flat (same as tutor view).
+      parameters:
+        - in: path
+          name: childId
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: homeworkId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Homework detail
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: '#/components/schemas/ChildHomeworkDetail'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Not a parent or child not belonging to parent
+        '404':
+          description: Homework not found
+
+  /homework/child/{childId}/{homeworkId}/draft:
+    post:
+      tags: [Homework — Child]
+      summary: Save draft answers
+      description: |
+        Saves answers as `isDraft: true`. Can be called multiple times. Uses upsert — re-saving a question overwrites the previous draft answer.
+
+        Transitions `ASSIGNED` → `IN_PROGRESS` on first save.
+
+        When homework is `REVERTED`, only reverted questions can be updated.
+      parameters:
+        - in: path
+          name: childId
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: homeworkId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [answers]
+              properties:
+                answers:
+                  type: array
+                  minItems: 1
+                  items:
+                    $ref: '#/components/schemas/AnswerInput'
+      responses:
+        '200':
+          description: Draft answers saved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      homeworkId:
+                        type: string
+                      status:
+                        type: string
+                        example: IN_PROGRESS
+                      savedCount:
+                        type: integer
+                        example: 3
+        '400':
+          description: Wrong status, question IDs don't belong to homework, or non-reverted question submitted during REVERTED status
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Not a parent or child mismatch
+        '404':
+          description: Homework or child not found
+
+  /homework/child/{childId}/{homeworkId}/submit:
+    post:
+      tags: [Homework — Child]
+      summary: Submit homework
+      description: |
+        Finalises submission — marks all draft answers as submitted. Unanswered questions are auto-created as `isSkipped: true`.
+
+        - MCQ / TRUE_FALSE: auto-scored immediately
+        - Written answers: AI grading triggered asynchronously via `homework.submitted` event
+
+        Only works on `ASSIGNED` or `IN_PROGRESS` status and before the deadline.
+      parameters:
+        - in: path
+          name: childId
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: homeworkId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Homework submitted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      homeworkId:
+                        type: string
+                      status:
+                        type: string
+                        example: SUBMITTED
+                      submittedAt:
+                        type: string
+                        format: date-time
+                      totalQuestions:
+                        type: integer
+                      answeredCount:
+                        type: integer
+                      skippedCount:
+                        type: integer
+                      score:
+                        type: number
+                        nullable: true
+                        description: MCQ score. Null if no MCQ/TRUE_FALSE questions.
+                      scoreOutOf:
+                        type: number
+                        nullable: true
+        '400':
+          description: Already submitted, deadline passed, or wrong status
+        '401':
+          description: Unauthenticated
+        '404':
+          description: Homework or child not found
+
+  /homework/child/{childId}/{homeworkId}/resubmit:
+    post:
+      tags: [Homework — Child]
+      summary: Resubmit reverted questions
+      description: |
+        Only works when homework is `REVERTED`. All reverted questions must be included. Previous answers are archived to `HomeworkAnswerRevision` before being overwritten.
+
+        MCQ questions are re-scored and AI grading is re-triggered for written answers.
+      parameters:
+        - in: path
+          name: childId
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: homeworkId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [answers]
+              properties:
+                answers:
+                  type: array
+                  minItems: 1
+                  description: Must include all reverted questions — partial resubmission is not allowed
+                  items:
+                    $ref: '#/components/schemas/AnswerInput'
+      responses:
+        '200':
+          description: Resubmission accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      homeworkId:
+                        type: string
+                      status:
+                        type: string
+                        example: SUBMITTED
+                      submittedAt:
+                        type: string
+                        format: date-time
+                      resubmittedCount:
+                        type: integer
+                      score:
+                        type: number
+                        nullable: true
+                      scoreOutOf:
+                        type: number
+                        nullable: true
+        '400':
+          description: Homework not REVERTED, non-reverted question included, or reverted question missing
+        '401':
+          description: Unauthenticated
+        '404':
+          description: Homework or child not found
+
+  /homework/parent/marketplace/price:
+    get:
+      tags: [Homework — Parent Marketplace]
+      summary: Calculate question bank bundle price
+      description: |
+        Returns pricing for purchasing a subtopic, topic, or subject bundle.
+
+        Discount tiers applied to the sum of individual question prices:
+        - `SUBTOPIC` — 0%
+        - `TOPIC` — 10%
+        - `SUBJECT` — 20%
+
+        All prices in pence (GBP).
+      parameters:
+        - in: query
+          name: type
+          required: true
+          schema:
+            type: string
+            enum: [SUBTOPIC, TOPIC, SUBJECT]
+        - in: query
+          name: entityId
+          required: true
+          schema:
+            type: string
+          description: ID of the subtopic / topic / subject being priced
+        - in: query
+          name: yearGroupId
+          required: true
+          schema:
+            type: string
+          description: Required for all types to scope questions by year group
+      responses:
+        '200':
+          description: Price calculated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                        enum: [SUBTOPIC, TOPIC, SUBJECT]
+                      entityId:
+                        type: string
+                      questionCount:
+                        type: integer
+                        example: 12
+                      totalPrice:
+                        type: integer
+                        description: Sum of all question prices in pence before discount
+                        example: 1200
+                      discountPct:
+                        type: integer
+                        description: Discount percentage
+                        example: 10
+                      discountAmount:
+                        type: integer
+                        description: Discount amount in pence
+                        example: 120
+                      finalPrice:
+                        type: integer
+                        description: Price after discount in pence
+                        example: 1080
+                      currency:
+                        type: string
+                        example: GBP
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Not a parent
+
+  /homework/parent/marketplace/subjects:
+    get:
+      tags: [Homework — Parent Marketplace]
+      summary: Browse subjects with published questions (parent)
+      description: Subjects that have at least one published bank question. Optionally filter by yearGroupId to show only subjects relevant to a child's year group.
+      parameters:
+        - in: query
+          name: yearGroupId
+          required: false
+          schema:
+            type: string
+          description: Filter subjects to those with questions for this year group
+        - in: query
+          name: childId
+          required: false
+          schema:
+            type: string
+          description: Optional child ID (for reference, yearGroupId takes precedence for filtering)
+      responses:
+        '200':
+          description: Subjects list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      subjects:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: string
+                            name:
+                              type: string
+                              example: Mathematics
+                            code:
+                              type: string
+                              example: MATHS
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Not a parent
+
+  /homework/parent/marketplace/topics:
+    get:
+      tags: [Homework — Parent Marketplace]
+      summary: Browse topics for a subject and year group (parent)
+      description: Topics (with nested subtopics) that have at least one published question for the given subject and year group.
+      parameters:
+        - in: query
+          name: subjectId
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: yearGroupId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Topics with subtopics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      topics:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: string
+                            name:
+                              type: string
+                              example: Algebra
+                            code:
+                              type: string
+                              example: ALG
+                            subTopics:
+                              type: array
+                              items:
+                                type: object
+                                properties:
+                                  id:
+                                    type: string
+                                  name:
+                                    type: string
+                                    example: Linear Equations
+                                  code:
+                                    type: string
+                                    example: ALG-01
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Not a parent
+        '404':
+          description: No curriculum found for this subject and year group
+
+  /homework/parent/marketplace/subtopics:
+    get:
+      tags: [Homework — Parent Marketplace]
+      summary: Browse subtopics for a topic (parent)
+      description: Subtopics for a topic that have at least one published bank question.
+      parameters:
+        - in: query
+          name: topicId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Subtopics list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      subTopics:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: string
+                            name:
+                              type: string
+                              example: Linear Equations
+                            code:
+                              type: string
+                              example: ALG-01
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Not a parent
+        '404':
+          description: Topic not found
+
+  /homework/parent/marketplace/checkout:
+    post:
+      tags: [Homework — Parent Marketplace]
+      summary: Create Stripe checkout for a single item
+      description: |
+        Single-item purchase flow. Creates a `QuestionBankPurchase` (PENDING) and a Stripe checkout session.
+
+        After successful payment, the webhook at `POST /payment/webhook` (event `checkout.session.completed`) grants access automatically.
+
+        Discount tiers:
+        - `SUBTOPIC` — 0%
+        - `TOPIC` — 10%
+        - `SUBJECT` — 20% (requires child to have a `yearGroupId`)
+
+        All prices in pence (GBP).
+
+        **For multi-item purchases, use the cart checkout instead.**
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, entityId, childId, successUrl, cancelUrl]
+              properties:
+                type:
+                  type: string
+                  enum: [SUBTOPIC, TOPIC, SUBJECT]
+                entityId:
+                  type: string
+                  description: ID of the subtopic / topic / subject
+                childId:
+                  type: string
+                  description: Child who will receive access
+                yearGroupId:
+                  type: string
+                  description: Required when type is SUBJECT
+                  nullable: true
+                successUrl:
+                  type: string
+                  format: uri
+                  example: https://app.rightsteps.app/success
+                cancelUrl:
+                  type: string
+                  format: uri
+                  example: https://app.rightsteps.app/cancel
+            example:
+              type: SUBTOPIC
+              entityId: cmst1abc0001r4ujxiqej3no
+              childId: cmp1child0001r4ujxiqej3no
+              successUrl: https://app.rightsteps.app/success
+              cancelUrl: https://app.rightsteps.app/cancel
+      responses:
+        '201':
+          description: Checkout session created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      checkoutUrl:
+                        type: string
+                        format: uri
+                        description: Redirect parent to this Stripe-hosted checkout URL
+                      sessionId:
+                        type: string
+                        description: Stripe checkout session ID
+                      purchaseId:
+                        type: string
+                        description: QuestionBankPurchase record ID (PENDING until payment)
+        '400':
+          description: Content has no questions (price is 0), or validation error
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Not a parent
+        '404':
+          description: Child not found or not belonging to parent
+
+  /homework/parent/marketplace/purchases:
+    get:
+      tags: [Homework — Parent Marketplace]
+      summary: Get purchase history
+      description: Paginated list of all question bank purchases made by this parent, ordered newest first.
+      parameters:
+        - in: query
+          name: page
+          schema:
+            type: integer
+            default: 1
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 10
+      responses:
+        '200':
+          description: Paginated purchase history
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      purchases:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: string
+                            questionCount:
+                              type: integer
+                              example: 12
+                            finalPricePence:
+                              type: integer
+                              example: 1080
+                            currency:
+                              type: string
+                              example: GBP
+                            paymentStatus:
+                              type: string
+                              enum: [PENDING, COMPLETED, FAILED, REFUNDED]
+                            purchasedAt:
+                              type: string
+                              format: date-time
+                            accessGrantedAt:
+                              type: string
+                              format: date-time
+                              nullable: true
+                            child:
+                              type: object
+                              nullable: true
+                              properties:
+                                id:
+                                  type: string
+                                firstName:
+                                  type: string
+                                lastName:
+                                  type: string
+                            yearGroup:
+                              type: object
+                              nullable: true
+                              properties:
+                                id:
+                                  type: string
+                                code:
+                                  type: string
+                                name:
+                                  type: string
+                            subTopic:
+                              type: object
+                              nullable: true
+                              properties:
+                                id:
+                                  type: string
+                                name:
+                                  type: string
+                            topic:
+                              type: object
+                              nullable: true
+                              properties:
+                                id:
+                                  type: string
+                                name:
+                                  type: string
+                            subject:
+                              type: object
+                              nullable: true
+                              properties:
+                                id:
+                                  type: string
+                                name:
+                                  type: string
+                      pagination:
+                        type: object
+                        properties:
+                          page:
+                            type: integer
+                          limit:
+                            type: integer
+                          total:
+                            type: integer
+                          totalPages:
+                            type: integer
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Not a parent
+
+  /homework/parent/marketplace/access:
+    get:
+      tags: [Homework — Parent Marketplace]
+      summary: Check child's access to a subtopic
+      description: Returns whether the child has active access to a specific subtopic (i.e. a `QuestionBankAccess` record exists).
+      parameters:
+        - in: query
+          name: childId
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: subTopicId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Access check result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      hasAccess:
+                        type: boolean
+                      grantedAt:
+                        type: string
+                        format: date-time
+                        nullable: true
+              examples:
+                hasAccess:
+                  value:
+                    success: true
+                    data:
+                      hasAccess: true
+                      grantedAt: '2026-07-01T10:30:00.000Z'
+                noAccess:
+                  value:
+                    success: true
+                    data:
+                      hasAccess: false
+                      grantedAt: null
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Not a parent
+        '404':
+          description: Child not found or not belonging to parent
+
+  /homework/parent/marketplace/cart:
+    get:
+      tags: [Homework — Parent Marketplace]
+      summary: Get cart contents
+      description: |
+        Returns the parent's current question bank cart with real-time pricing for each item.
+
+        Each item includes:
+        - `type` — `SUBTOPIC`, `TOPIC`, or `SUBJECT`
+        - `label` — human-readable name of the entity
+        - `pricing` — live pricing including discount and final price in pence
+        - `child` — child who will receive access
+
+        `total` is the sum of all `finalPrice` values.
+      responses:
+        '200':
+          description: Cart contents
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: string
+                              description: CartItem ID — use this in remove/checkout calls
+                            entityType:
+                              type: string
+                              enum: [QBK_SUBTOPIC, QBK_TOPIC, QBK_SUBJECT]
+                            entityId:
+                              type: string
+                            type:
+                              type: string
+                              enum: [SUBTOPIC, TOPIC, SUBJECT]
+                            label:
+                              type: string
+                              example: Linear Equations
+                            child:
+                              type: object
+                              nullable: true
+                              properties:
+                                id:
+                                  type: string
+                                name:
+                                  type: string
+                                  example: Ayesha Khan
+                                yearGroupId:
+                                  type: string
+                                  nullable: true
+                            pricing:
+                              type: object
+                              properties:
+                                questionCount:
+                                  type: integer
+                                  example: 12
+                                totalPrice:
+                                  type: integer
+                                  description: Sum of question prices before discount (pence)
+                                  example: 1200
+                                discountPct:
+                                  type: integer
+                                  example: 0
+                                discountAmount:
+                                  type: integer
+                                  example: 0
+                                finalPrice:
+                                  type: integer
+                                  description: Price after discount (pence)
+                                  example: 1200
+                                currency:
+                                  type: string
+                                  example: GBP
+                      total:
+                        type: integer
+                        description: Sum of all item finalPrice values in pence
+                        example: 2400
+                      currency:
+                        type: string
+                        example: GBP
+              examples:
+                cartWithItems:
+                  summary: Cart with two items
+                  value:
+                    success: true
+                    data:
+                      items:
+                        - id: cm_cartitem_001
+                          entityType: QBK_SUBTOPIC
+                          entityId: cmst1abc0001r4ujxiqej3no
+                          type: SUBTOPIC
+                          label: Linear Equations
+                          child:
+                            id: cm_child_001
+                            name: Ayesha Khan
+                            yearGroupId: cm_yg_001
+                          pricing:
+                            questionCount: 10
+                            totalPrice: 1000
+                            discountPct: 0
+                            discountAmount: 0
+                            finalPrice: 1000
+                            currency: GBP
+                        - id: cm_cartitem_002
+                          entityType: QBK_TOPIC
+                          entityId: cmtopic1abc0001r4ujxiqej3no
+                          type: TOPIC
+                          label: Algebra
+                          child:
+                            id: cm_child_001
+                            name: Ayesha Khan
+                            yearGroupId: cm_yg_001
+                          pricing:
+                            questionCount: 40
+                            totalPrice: 4000
+                            discountPct: 10
+                            discountAmount: 400
+                            finalPrice: 3600
+                            currency: GBP
+                      total: 4600
+                      currency: GBP
+                emptyCart:
+                  summary: Empty cart
+                  value:
+                    success: true
+                    data:
+                      items: []
+                      total: 0
+                      currency: GBP
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Not a parent
+
+  /homework/parent/marketplace/cart/items:
+    post:
+      tags: [Homework — Parent Marketplace]
+      summary: Add item to cart
+      description: |
+        Adds a single question bank item to the cart. Each combination of `(type, entityId, childId)` is unique — adding a duplicate returns `409`.
+
+        **SUBJECT purchases require the child to have a `yearGroupId` assigned** — the service validates this at add time (400 if missing).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, entityId, childId]
+              properties:
+                type:
+                  type: string
+                  enum: [SUBTOPIC, TOPIC, SUBJECT]
+                entityId:
+                  type: string
+                  description: ID of the subtopic / topic / subject
+                childId:
+                  type: string
+                  description: Child who will receive access upon purchase
+            examples:
+              addSubtopic:
+                summary: Add a subtopic
+                value:
+                  type: SUBTOPIC
+                  entityId: cmst1abc0001r4ujxiqej3no
+                  childId: cmp1child0001r4ujxiqej3no
+              addTopic:
+                summary: Add a topic bundle
+                value:
+                  type: TOPIC
+                  entityId: cmtopic1abc0001r4ujxiqej3no
+                  childId: cmp1child0001r4ujxiqej3no
+      responses:
+        '201':
+          description: Item added to cart
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      item:
+                        type: object
+                        properties:
+                          id:
+                            type: string
+                            description: CartItem ID
+                          entityType:
+                            type: string
+                            enum: [QBK_SUBTOPIC, QBK_TOPIC, QBK_SUBJECT]
+                          entityId:
+                            type: string
+                          childId:
+                            type: string
+                          createdAt:
+                            type: string
+                            format: date-time
+        '400':
+          description: Child has no yearGroupId and type is SUBJECT
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Not a parent or child not belonging to parent
+        '404':
+          description: Child not found
+        '409':
+          description: Item already in cart (same type + entityId + childId combination)
+
+  /homework/parent/marketplace/cart/items/remove:
+    post:
+      tags: [Homework — Parent Marketplace]
+      summary: Remove item from cart
+      description: Removes a cart item by its ID. The `cartItemId` is the `id` returned from GET cart or POST cart/items.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cartItemId]
+              properties:
+                cartItemId:
+                  type: string
+            example:
+              cartItemId: cm_cartitem_001
+      responses:
+        '200':
+          description: Item removed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    nullable: true
+                    example: null
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Not a parent
+        '404':
+          description: Cart item not found or does not belong to this user
+
+  /homework/parent/marketplace/cart/checkout:
+    post:
+      tags: [Homework — Parent Marketplace]
+      summary: Checkout all cart items via Stripe
+      description: |
+        Creates one Stripe checkout session covering all cart items as separate line items. Each item gets its own `QuestionBankPurchase` record (PENDING).
+
+        After payment, the webhook auto-grants access for all items and clears the purchase IDs from Redis.
+
+        **Pre-checkout validation:**
+        - Cart must not be empty
+        - All items must have `finalPrice > 0` (items with 0 price — no questions — are blocked)
+
+        On success, redirect the parent to `checkoutUrl`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [successUrl, cancelUrl]
+              properties:
+                successUrl:
+                  type: string
+                  format: uri
+                  example: https://app.rightsteps.app/success
+                cancelUrl:
+                  type: string
+                  format: uri
+                  example: https://app.rightsteps.app/cancel
+      responses:
+        '201':
+          description: Checkout session created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      checkoutUrl:
+                        type: string
+                        format: uri
+                        description: Redirect parent to this Stripe-hosted checkout URL
+                      sessionId:
+                        type: string
+                        description: Stripe checkout session ID
+              examples:
+                success:
+                  value:
+                    success: true
+                    data:
+                      checkoutUrl: https://checkout.stripe.com/pay/cs_test_abc123
+                      sessionId: cs_test_abc123
+        '400':
+          description: Cart is empty, or one or more items have no available questions (price = 0)
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Not a parent
+
+  /homework/parent/child/{childId}:
+    get:
+      tags: [Homework — Parent]
+      summary: List homework for a child (parent view)
+      description: Paginated list of all non-draft homework assigned to the child. Parent must own the child.
+      parameters:
+        - in: path
+          name: childId
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: page
+          schema:
+            type: integer
+            default: 1
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 10
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [ASSIGNED, IN_PROGRESS, SUBMITTED, REVERTED, COMPLETED, MISSED, CANCELLED]
+      responses:
+        '200':
+          description: Paginated list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      homeworks:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/ChildHomeworkListItem'
+                      pagination:
+                        $ref: '#/components/schemas/Pagination'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Not a parent
+        '404':
+          description: Child not found
+
+  /homework/parent/{homeworkId}:
+    get:
+      tags: [Homework — Parent]
+      summary: Get homework detail (parent view)
+      description: Full homework detail for a homework belonging to this parent. Same structure as child view including all answer grades.
+      parameters:
+        - in: path
+          name: homeworkId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Homework detail
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: '#/components/schemas/ChildHomeworkDetail'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Not a parent
+        '404':
+          description: Homework not found
+
+  /homework/question-bank/subjects:
+    get:
+      tags: [Homework — Question Bank]
+      summary: Browse subjects with published questions
+      description: Subjects that have at least one published bank question. Requires active homework subscription.
+      responses:
+        '200':
+          description: Subjects list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      subjects:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: string
+                            name:
+                              type: string
+                              example: Mathematics
+                            code:
+                              type: string
+                              example: MATHS
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Not a tutor or subscription inactive
+
+  /homework/question-bank/topics:
+    get:
+      tags: [Homework — Question Bank]
+      summary: Browse topics with published questions
+      description: Topics (with nested subtopics) for a given subject and year group that have at least one published question.
+      parameters:
+        - in: query
+          name: subjectId
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: yearGroupId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Topics with subtopics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      topics:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: string
+                            name:
+                              type: string
+                              example: Algebra
+                            code:
+                              type: string
+                              example: ALG
+                            subTopics:
+                              type: array
+                              items:
+                                type: object
+                                properties:
+                                  id:
+                                    type: string
+                                  name:
+                                    type: string
+                                    example: Linear Equations
+                                  code:
+                                    type: string
+                                    example: ALG-01
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Not a tutor or subscription inactive
+        '404':
+          description: No curriculum found for this subject and year group
+
+  /homework/question-bank/subtopics:
+    get:
+      tags: [Homework — Question Bank]
+      summary: Browse subtopics with published questions
+      description: Subtopics for a topic that have at least one published bank question.
+      parameters:
+        - in: query
+          name: topicId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Subtopics list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      subTopics:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: string
+                            name:
+                              type: string
+                              example: Linear Equations
+                            code:
+                              type: string
+                              example: ALG-01
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Not a tutor or subscription inactive
+        '404':
+          description: Topic not found
+
+  /homework/question-bank/questions:
+    get:
+      tags: [Homework — Question Bank]
+      summary: Browse published bank questions
+      description: Paginated list of published bank questions for a subtopic. Filter by type, examBoard, level, difficulty, and objective.
+      parameters:
+        - in: query
+          name: subTopicId
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: objectiveId
+          schema:
+            type: string
+        - in: query
+          name: type
+          schema:
+            type: string
+            enum: [MULTIPLE_CHOICE, SHORT_ANSWER, LONG_ANSWER, FILL_BLANK, MATCH, TRUE_FALSE, ORDERING, READING_COMPREHENSION, VIDEO]
+        - in: query
+          name: examBoard
+          schema:
+            type: string
+            enum: [EDEXCEL, AQA, OCR, WJEC, CAMBRIDGE, IB, NONE]
+        - in: query
+          name: level
+          schema:
+            type: string
+            enum: [KS3, GCSE, A_LEVEL, ELEVEN_PLUS, SATS]
+        - in: query
+          name: difficulty
+          schema:
+            type: string
+            enum: [FOUNDATION, STANDARD, HIGHER, STRETCH]
+        - in: query
+          name: page
+          schema:
+            type: integer
+            default: 1
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Paginated bank questions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      questions:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/BankQuestion'
+                      pagination:
+                        $ref: '#/components/schemas/Pagination'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Not a tutor or subscription inactive
+
+  /homework/question-bank/questions/{bankQuestionId}:
+    get:
+      tags: [Homework — Question Bank]
+      summary: Get bank question detail
+      description: Full detail of a single published bank question including modelAnswer and correctOption.
+      parameters:
+        - in: path
+          name: bankQuestionId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Bank question detail
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      question:
+                        allOf:
+                          - $ref: '#/components/schemas/BankQuestion'
+                          - type: object
+                            properties:
+                              modelAnswer:
+                                type: string
+                                nullable: true
+                              correctOption:
+                                type: string
+                                nullable: true
+                              topicId:
+                                type: string
+                              subjectId:
+                                type: string
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Not a tutor or subscription inactive
+        '404':
+          description: Bank question not found or not published
+
+  /homework/admin/question-bank/questions:
+    post:
+      tags: [Homework — Admin]
+      summary: Create a bank question
+      description: |
+        Creates a new bank question. Starts as unpublished (`isPublished: false`). Use the publish endpoint to make it visible to tutors.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subjectId, topicId, subTopicId, type, questionText]
+              properties:
+                subjectId:
+                  type: string
+                topicId:
+                  type: string
+                subTopicId:
+                  type: string
+                objectiveId:
+                  type: string
+                  nullable: true
+                type:
+                  type: string
+                  enum: [MULTIPLE_CHOICE, SHORT_ANSWER, LONG_ANSWER, FILL_BLANK, MATCH, TRUE_FALSE, ORDERING, READING_COMPREHENSION, VIDEO]
+                questionText:
+                  type: string
+                  minLength: 1
+                modelAnswer:
+                  type: string
+                  nullable: true
+                imageUploadIds:
+                  type: array
+                  items:
+                    type: string
+                  default: []
+                options:
+                  type: array
+                  items:
+                    type: string
+                  description: Required for MULTIPLE_CHOICE and TRUE_FALSE
+                correctOption:
+                  type: string
+                  nullable: true
+                  description: Required for MULTIPLE_CHOICE and TRUE_FALSE
+                matchPairs:
+                  type: object
+                  nullable: true
+                  additionalProperties:
+                    type: string
+                  description: Required for MATCH
+                orderItems:
+                  type: array
+                  items:
+                    type: string
+                  description: Required for ORDERING (min 2 items)
+                blankAnswers:
+                  type: array
+                  items:
+                    type: string
+                  description: Required for FILL_BLANK
+                examBoard:
+                  type: string
+                  nullable: true
+                  enum: [EDEXCEL, AQA, OCR, WJEC, CAMBRIDGE, IB, NONE]
+                level:
+                  type: string
+                  nullable: true
+                  enum: [KS3, GCSE, A_LEVEL, ELEVEN_PLUS, SATS]
+                difficulty:
+                  type: string
+                  nullable: true
+                  enum: [FOUNDATION, STANDARD, HIGHER, STRETCH]
+                price:
+                  type: integer
+                  minimum: 0
+                  default: 0
+                  description: Price in pence
+      responses:
+        '201':
+          description: Bank question created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      bankQuestion:
+                        $ref: '#/components/schemas/AdminBankQuestion'
+        '400':
+          description: Validation error
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Not an admin
+        '404':
+          description: Subject, topic, subtopic, or objective not found
+
+    get:
+      tags: [Homework — Admin]
+      summary: List all bank questions (admin)
+      description: Paginated list of all bank questions including unpublished. Filterable by subject, topic, subtopic, objective, type, examBoard, level, difficulty, publish status, and keyword search.
+      parameters:
+        - in: query
+          name: subjectId
+          schema:
+            type: string
+        - in: query
+          name: topicId
+          schema:
+            type: string
+        - in: query
+          name: subTopicId
+          schema:
+            type: string
+        - in: query
+          name: objectiveId
+          schema:
+            type: string
+        - in: query
+          name: type
+          schema:
+            type: string
+            enum: [MULTIPLE_CHOICE, SHORT_ANSWER, LONG_ANSWER, FILL_BLANK, MATCH, TRUE_FALSE, ORDERING, READING_COMPREHENSION, VIDEO]
+        - in: query
+          name: examBoard
+          schema:
+            type: string
+            enum: [EDEXCEL, AQA, OCR, WJEC, CAMBRIDGE, IB, NONE]
+        - in: query
+          name: level
+          schema:
+            type: string
+            enum: [KS3, GCSE, A_LEVEL, ELEVEN_PLUS, SATS]
+        - in: query
+          name: difficulty
+          schema:
+            type: string
+            enum: [FOUNDATION, STANDARD, HIGHER, STRETCH]
+        - in: query
+          name: isPublished
+          schema:
+            type: string
+            enum: ['true', 'false']
+        - in: query
+          name: search
+          schema:
+            type: string
+          description: Keyword search on questionText
+        - in: query
+          name: page
+          schema:
+            type: integer
+            default: 1
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Paginated bank questions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      questions:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/AdminBankQuestion'
+                      pagination:
+                        $ref: '#/components/schemas/Pagination'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Not an admin
+
+  /homework/admin/question-bank/questions/{bankQuestionId}/update:
+    post:
+      tags: [Homework — Admin]
+      summary: Update a bank question
+      description: Partially updates a bank question. All fields optional — only provided fields are updated.
+      parameters:
+        - in: path
+          name: bankQuestionId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                subjectId:
+                  type: string
+                topicId:
+                  type: string
+                subTopicId:
+                  type: string
+                objectiveId:
+                  type: string
+                  nullable: true
+                type:
+                  type: string
+                  enum: [MULTIPLE_CHOICE, SHORT_ANSWER, LONG_ANSWER, FILL_BLANK, MATCH, TRUE_FALSE, ORDERING, READING_COMPREHENSION, VIDEO]
+                questionText:
+                  type: string
+                  minLength: 1
+                modelAnswer:
+                  type: string
+                  nullable: true
+                imageUploadIds:
+                  type: array
+                  items:
+                    type: string
+                options:
+                  type: array
+                  items:
+                    type: string
+                correctOption:
+                  type: string
+                  nullable: true
+                matchPairs:
+                  type: object
+                  nullable: true
+                  additionalProperties:
+                    type: string
+                orderItems:
+                  type: array
+                  items:
+                    type: string
+                blankAnswers:
+                  type: array
+                  items:
+                    type: string
+                examBoard:
+                  type: string
+                  nullable: true
+                  enum: [EDEXCEL, AQA, OCR, WJEC, CAMBRIDGE, IB, NONE]
+                level:
+                  type: string
+                  nullable: true
+                  enum: [KS3, GCSE, A_LEVEL, ELEVEN_PLUS, SATS]
+                difficulty:
+                  type: string
+                  nullable: true
+                  enum: [FOUNDATION, STANDARD, HIGHER, STRETCH]
+                price:
+                  type: integer
+                  minimum: 0
+                  description: Price in pence
+      responses:
+        '200':
+          description: Bank question updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      bankQuestion:
+                        $ref: '#/components/schemas/AdminBankQuestion'
+        '400':
+          description: Validation error
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Not an admin
+        '404':
+          description: Bank question not found
+
+  /homework/admin/question-bank/questions/{bankQuestionId}/publish:
+    post:
+      tags: [Homework — Admin]
+      summary: Publish a bank question
+      description: Marks the question as published. Makes it visible to tutors browsing the question bank.
+      parameters:
+        - in: path
+          name: bankQuestionId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Bank question published
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      bankQuestion:
+                        $ref: '#/components/schemas/AdminBankQuestion'
+        '400':
+          description: Already published
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Not an admin
+        '404':
+          description: Bank question not found
+
+  /homework/admin/question-bank/questions/{bankQuestionId}/unpublish:
+    post:
+      tags: [Homework — Admin]
+      summary: Unpublish a bank question
+      description: Marks the question as unpublished. Hides it from tutors without deleting.
+      parameters:
+        - in: path
+          name: bankQuestionId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Bank question unpublished
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      bankQuestion:
+                        $ref: '#/components/schemas/AdminBankQuestion'
+        '400':
+          description: Already unpublished
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Not an admin
+        '404':
+          description: Bank question not found
+
+  /homework/admin/question-bank/questions/{bankQuestionId}/deactivate:
+    post:
+      tags: [Homework — Admin]
+      summary: Deactivate a bank question
+      description: Soft deletes the bank question. Removes it from all browsing and pricing calculations.
+      parameters:
+        - in: path
+          name: bankQuestionId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Bank question deactivated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      bankQuestion:
+                        $ref: '#/components/schemas/AdminBankQuestion'
+        '400':
+          description: Already deactivated
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Not an admin
+        '404':
+          description: Bank question not found

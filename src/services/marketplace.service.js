@@ -1,0 +1,43 @@
+import axiosClient from '../api/axiosClient';
+
+const getPrice = (params) =>
+  axiosClient.get('/homework/parent/marketplace/price', { params }).then((res) => res.data.data);
+
+const browseSubjects = (params = {}) =>
+  axiosClient.get('/homework/parent/marketplace/subjects', { params }).then((res) => res.data.data);
+
+const browseTopics = (params) =>
+  axiosClient.get('/homework/parent/marketplace/topics', { params }).then((res) => res.data.data);
+
+const browseSubtopics = (params) =>
+  axiosClient.get('/homework/parent/marketplace/subtopics', { params }).then((res) => res.data.data);
+
+const getPurchases = (params = {}) =>
+  axiosClient.get('/homework/parent/marketplace/purchases', { params }).then((res) => res.data.data);
+
+const checkAccess = (params) =>
+  axiosClient.get('/homework/parent/marketplace/access', { params }).then((res) => res.data.data);
+
+const getCart = () => axiosClient.get('/homework/parent/marketplace/cart').then((res) => res.data.data);
+
+const addCartItem = (payload) =>
+  axiosClient.post('/homework/parent/marketplace/cart/items', payload).then((res) => res.data.data);
+
+const removeCartItem = (cartItemId) =>
+  axiosClient.post('/homework/parent/marketplace/cart/items/remove', { cartItemId }).then((res) => res.data.data);
+
+const checkoutCart = (payload) =>
+  axiosClient.post('/homework/parent/marketplace/cart/checkout', payload).then((res) => res.data.data);
+
+export {
+  getPrice,
+  browseSubjects,
+  browseTopics,
+  browseSubtopics,
+  getPurchases,
+  checkAccess,
+  getCart,
+  addCartItem,
+  removeCartItem,
+  checkoutCart,
+};
