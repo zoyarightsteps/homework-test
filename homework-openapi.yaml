@@ -1916,6 +1916,86 @@ paths:
         '403':
           description: Not a parent
 
+  /homework/parent/marketplace/preview:
+    get:
+      tags: [Homework — Parent Marketplace]
+      summary: Preview questions in a question bank bundle before purchase
+      description: |
+        Returns the number of questions and a list of them (without answers)
+        for a subtopic, topic, or subject bundle — so a parent can see what
+        they're buying before checkout, alongside the price from
+        `/homework/parent/marketplace/price`.
+      parameters:
+        - in: query
+          name: type
+          required: true
+          schema:
+            type: string
+            enum: [SUBTOPIC, TOPIC, SUBJECT]
+        - in: query
+          name: entityId
+          required: true
+          schema:
+            type: string
+          description: ID of the subtopic / topic / subject being previewed
+        - in: query
+          name: yearGroupId
+          required: true
+          schema:
+            type: string
+          description: Required for all types to scope questions by year group
+      responses:
+        '200':
+          description: Preview retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                        enum: [SUBTOPIC, TOPIC, SUBJECT]
+                      entityId:
+                        type: string
+                      questionCount:
+                        type: integer
+                        example: 12
+                      questions:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: string
+                            type:
+                              type: string
+                            questionText:
+                              type: string
+                            options:
+                              type: array
+                              items:
+                                type: string
+                            examBoard:
+                              type: string
+                              nullable: true
+                            level:
+                              type: string
+                              nullable: true
+                            difficulty:
+                              type: string
+                              nullable: true
+                            subTopicId:
+                              type: string
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Not a parent
+
   /homework/parent/marketplace/subjects:
     get:
       tags: [Homework — Parent Marketplace]

@@ -3,6 +3,9 @@ import axiosClient from '../api/axiosClient';
 const getPrice = (params) =>
   axiosClient.get('/homework/parent/marketplace/price', { params }).then((res) => res.data.data);
 
+const getPreview = (params) =>
+  axiosClient.get('/homework/parent/marketplace/preview', { params }).then((res) => res.data.data);
+
 const browseSubjects = (params = {}) =>
   axiosClient.get('/homework/parent/marketplace/subjects', { params }).then((res) => res.data.data);
 
@@ -31,6 +34,7 @@ const checkoutCart = (payload) =>
 
 export {
   getPrice,
+  getPreview,
   browseSubjects,
   browseTopics,
   browseSubtopics,

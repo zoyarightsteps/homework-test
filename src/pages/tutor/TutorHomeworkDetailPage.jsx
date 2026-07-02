@@ -14,6 +14,8 @@ import {
 import { QUESTION_TYPES, TUTOR_GRADES } from '../../constants/homework';
 import { useToast } from '../../context/ToastContext';
 import { getErrorMessage } from '../../utils/getErrorMessage';
+import { browseCurriculum } from '../../services/curriculum.service';
+import { getHomeworkCurriculum, saveHomeworkCurriculum } from '../../utils/homeworkCurriculumCache';
 import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
 import { Input, Textarea, Select } from '../../components/ui/Field';
@@ -21,6 +23,7 @@ import StatusBadge from '../../components/ui/StatusBadge';
 import Spinner from '../../components/ui/Spinner';
 import Badge from '../../components/ui/Badge';
 import QuestionTypeFields from '../../components/homework/QuestionTypeFields';
+import { defaultsForType, validateQuestionFields } from '../../utils/questionTypeDefaults';
 
 const emptyQuestion = {
   type: 'MULTIPLE_CHOICE',
@@ -31,6 +34,8 @@ const emptyQuestion = {
   matchPairs: {},
   orderItems: ['', ''],
   blankAnswers: [''],
+  subTopicId: '',
+  objectiveId: '',
 };
 
 function toLocalInputValue(isoDeadline) {
@@ -50,8 +55,14 @@ export default function TutorHomeworkDetailPage() {
   const [addingQuestion, setAddingQuestion] = useState(false);
 
   const [bankSubTopicId, setBankSubTopicId] = useState('');
+  const [bankObjectiveId, setBankObjectiveId] = useState('');
   const [bankResults, setBankResults] = useState([]);
   const [bankSearching, setBankSearching] = useState(false);
+
+  const [yearGroups, setYearGroups] = useState([]);
+  const [currYearGroupId, setCurrYearGroupId] = useState('');
+  const [topicsForSubject, setTopicsForSubject] = useState([]);
+  const [currTopicId, setCurrTopicId] = useState('');
 
   const [childId, setChildId] = useState('');
   const [sessionId, setSessionId] = useState('');
@@ -85,6 +96,33 @@ export default function TutorHomeworkDetailPage() {
     load();
   }, [load]);
 
+  useEffect(() => {
+    browseCurriculum().then((data) => setYearGroups(data.yearGroups || []));
+  }, []);
+
+  useEffect(() => {
+    if (!hw) return;
+    const cached = getHomeworkCurriculum(homeworkId);
+    if (cached?.yearGroupId) setCurrYearGroupId(cached.yearGroupId);
+    if (cached?.topicId) setCurrTopicId(cached.topicId);
+  }, [hw, homeworkId]);
+
+  useEffect(() => {
+    if (!currYearGroupId || !hw?.subject?.id) {
+      setTopicsForSubject([]);
+      return;
+    }
+    browseCurriculum({ yearGroupId: currYearGroupId, subjectId: hw.subject.id }).then((data) =>
+      setTopicsForSubject(data.topics || [])
+    );
+  }, [currYearGroupId, hw?.subject?.id]);
+
+  useEffect(() => {
+    if (currYearGroupId && currTopicId && hw?.subject?.id) {
+      saveHomeworkCurriculum(homeworkId, { yearGroupId: currYearGroupId, subjectId: hw.subject.id, topicId: currTopicId });
+    }
+  }, [currYearGroupId, currTopicId, homeworkId, hw?.subject?.id]);
+
   if (loading || !hw) {
     return (
       <div className="flex items-center justify-center gap-2 py-20 text-slate-400">
@@ -93,14 +131,36 @@ export default function TutorHomeworkDetailPage() {
     );
   }
 
+  const selectedTopicForCurriculum = topicsForSubject.find((t) => t.id === currTopicId);
+  const subTopicsForTopic = selectedTopicForCurriculum?.subTopics || [];
+
+  const taggedSubTopicIds = new Set((hw.subTopics || []).map((s) => s.id));
+  const isRestrictedToTaggedSubTopics = taggedSubTopicIds.size > 0;
+  const questionLevelSubTopics = isRestrictedToTaggedSubTopics
+    ? subTopicsForTopic.length
+      ? subTopicsForTopic.filter((s) => taggedSubTopicIds.has(s.id))
+      : hw.subTopics || []
+    : subTopicsForTopic;
+  const subTopicPickerDisabled = !isRestrictedToTaggedSubTopics && !currTopicId;
+
+  const selectedBankSubTopic = subTopicsForTopic.find((s) => s.id === bankSubTopicId);
+  const selectedQuestionSubTopic = subTopicsForTopic.find((s) => s.id === newQuestion.subTopicId);
+
   const handleAddCustomQuestion = async (e) => {
     e.preventDefault();
+    const validationError = validateQuestionFields(newQuestion.type, newQuestion);
+    if (validationError) {
+      toast.error(validationError);
+      return;
+    }
     setAddingQuestion(true);
     try {
       const payload = {
         type: newQuestion.type,
         questionText: newQuestion.questionText,
         order: (hw.questions?.length || 0) + 1,
+        subTopicId: newQuestion.subTopicId || undefined,
+        objectiveId: newQuestion.objectiveId || undefined,
       };
       if (newQuestion.type === 'MULTIPLE_CHOICE' || newQuestion.type === 'TRUE_FALSE') {
         payload.options = newQuestion.options.filter(Boolean);
@@ -127,12 +187,16 @@ export default function TutorHomeworkDetailPage() {
 
   const searchBank = async () => {
     if (!bankSubTopicId) {
-      toast.error('Enter a subtopic ID to search the bank');
+      toast.error('Select a subtopic to search the bank');
       return;
     }
     setBankSearching(true);
     try {
-      const data = await browseBankQuestions({ subTopicId: bankSubTopicId, limit: 10 });
+      const data = await browseBankQuestions({
+        subTopicId: bankSubTopicId,
+        objectiveId: bankObjectiveId || undefined,
+        limit: 10,
+      });
       setBankResults(data.questions || []);
     } catch (err) {
       toast.error(getErrorMessage(err));
@@ -370,12 +434,50 @@ export default function TutorHomeworkDetailPage() {
       {isDraft && (
         <>
           <Card className="p-5">
+            <h2 className="mb-1 text-sm font-semibold text-slate-800">Curriculum context</h2>
+            <p className="mb-3 text-xs text-slate-400">
+              Pick the year group so we can look up subtopics/objectives under <strong>{hw.subject?.name}</strong> →{' '}
+              this homework's topic. Used below to tag questions and to browse the bank.
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <Select
+                label="Year Group"
+                value={currYearGroupId}
+                onChange={(e) => {
+                  setCurrYearGroupId(e.target.value);
+                  setCurrTopicId('');
+                }}
+              >
+                <option value="">Select year group…</option>
+                {yearGroups.map((yg) => (
+                  <option key={yg.id} value={yg.id}>
+                    {yg.name} ({yg.keyStage})
+                  </option>
+                ))}
+              </Select>
+              <Select
+                label="Topic"
+                value={currTopicId}
+                disabled={!currYearGroupId}
+                onChange={(e) => setCurrTopicId(e.target.value)}
+              >
+                <option value="">Select topic…</option>
+                {topicsForSubject.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          </Card>
+
+          <Card className="p-5">
             <h2 className="mb-3 text-sm font-semibold text-slate-800">Add a custom question</h2>
             <form onSubmit={handleAddCustomQuestion} className="space-y-3">
               <Select
                 label="Type"
                 value={newQuestion.type}
-                onChange={(e) => setNewQuestion((prev) => ({ ...prev, type: e.target.value }))}
+                onChange={(e) => setNewQuestion((prev) => ({ ...prev, type: e.target.value, ...defaultsForType(e.target.value) }))}
               >
                 {QUESTION_TYPES.map((t) => (
                   <option key={t} value={t}>
@@ -401,6 +503,44 @@ export default function TutorHomeworkDetailPage() {
                 value={newQuestion}
                 onChange={(patch) => setNewQuestion((prev) => ({ ...prev, ...patch }))}
               />
+              <div className="grid grid-cols-2 gap-3">
+                <Select
+                  label="Subtopic (optional)"
+                  value={newQuestion.subTopicId}
+                  disabled={subTopicPickerDisabled}
+                  onChange={(e) => setNewQuestion((prev) => ({ ...prev, subTopicId: e.target.value, objectiveId: '' }))}
+                >
+                  <option value="">None</option>
+                  {questionLevelSubTopics.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </Select>
+                <Select
+                  label="Objective (optional)"
+                  value={newQuestion.objectiveId}
+                  disabled={!newQuestion.subTopicId || !selectedQuestionSubTopic}
+                  onChange={(e) => setNewQuestion((prev) => ({ ...prev, objectiveId: e.target.value }))}
+                >
+                  <option value="">None</option>
+                  {(selectedQuestionSubTopic?.objectives || []).map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.objectiveId} — {o.learningObjective}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              {subTopicPickerDisabled && (
+                <p className="-mt-2 text-xs text-slate-400">
+                  Set year group + topic above to tag this question with a subtopic/objective.
+                </p>
+              )}
+              {!subTopicPickerDisabled && newQuestion.subTopicId && !currTopicId && (
+                <p className="-mt-2 text-xs text-slate-400">
+                  Set year group + topic above to also pick an objective for this subtopic.
+                </p>
+              )}
               <Button type="submit" disabled={addingQuestion}>
                 {addingQuestion ? 'Adding…' : '+ Add Question'}
               </Button>
@@ -409,19 +549,57 @@ export default function TutorHomeworkDetailPage() {
 
           <Card className="p-5">
             <h2 className="mb-3 text-sm font-semibold text-slate-800">Add from question bank</h2>
-            <div className="flex gap-2">
-              <Input
-                label="Subtopic ID"
+            {isRestrictedToTaggedSubTopics ? (
+              <p className="mb-2 text-xs text-slate-400">
+                This draft is tagged to specific subtopics — only searching within those.
+              </p>
+            ) : (
+              !currTopicId && (
+                <p className="mb-2 text-xs text-slate-400">
+                  Set year group + topic above to see this topic's subtopics.
+                </p>
+              )
+            )}
+            <div className="grid grid-cols-2 gap-3">
+              <Select
+                label="Subtopic"
                 value={bankSubTopicId}
-                onChange={(e) => setBankSubTopicId(e.target.value)}
-                placeholder="cuid of a subtopic"
-                className="flex-1"
-              />
-              <div className="flex items-end">
-                <Button type="button" variant="secondary" onClick={searchBank} disabled={bankSearching}>
-                  {bankSearching ? 'Searching…' : 'Search'}
-                </Button>
-              </div>
+                disabled={subTopicPickerDisabled}
+                onChange={(e) => {
+                  setBankSubTopicId(e.target.value);
+                  setBankObjectiveId('');
+                }}
+              >
+                <option value="">Select subtopic…</option>
+                {questionLevelSubTopics.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </Select>
+              <Select
+                label="Objective (optional)"
+                value={bankObjectiveId}
+                disabled={!selectedBankSubTopic}
+                onChange={(e) => setBankObjectiveId(e.target.value)}
+              >
+                <option value="">Any</option>
+                {(selectedBankSubTopic?.objectives || []).map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.objectiveId} — {o.learningObjective}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            {isRestrictedToTaggedSubTopics && !currTopicId && (
+              <p className="mt-2 text-xs text-slate-400">
+                Set year group + topic above to also filter by objective.
+              </p>
+            )}
+            <div className="mt-3 flex justify-end">
+              <Button type="button" variant="secondary" onClick={searchBank} disabled={bankSearching}>
+                {bankSearching ? 'Searching…' : 'Search'}
+              </Button>
             </div>
             {bankResults.length > 0 && (
               <div className="mt-3 space-y-2">

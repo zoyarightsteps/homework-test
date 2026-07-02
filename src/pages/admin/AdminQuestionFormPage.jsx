@@ -9,6 +9,7 @@ import Button from '../../components/ui/Button';
 import { Input, Select, Textarea } from '../../components/ui/Field';
 import CurriculumPicker from '../../components/homework/CurriculumPicker';
 import QuestionTypeFields from '../../components/homework/QuestionTypeFields';
+import { defaultsForType, validateQuestionFields } from '../../utils/questionTypeDefaults';
 
 const emptyForm = {
   subjectId: '',
@@ -90,6 +91,11 @@ export default function AdminQuestionFormPage() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    const validationError = validateQuestionFields(form.type, form);
+    if (validationError) {
+      toast.error(validationError);
+      return;
+    }
     setSaving(true);
     try {
       const payload = buildPayload();
@@ -130,7 +136,12 @@ export default function AdminQuestionFormPage() {
 
         <Card className="space-y-4 p-5">
           <h2 className="text-sm font-semibold text-slate-800">Question</h2>
-          <Select label="Question Type" required value={form.type} onChange={(e) => patch({ type: e.target.value })}>
+          <Select
+            label="Question Type"
+            required
+            value={form.type}
+            onChange={(e) => patch({ type: e.target.value, ...defaultsForType(e.target.value) })}
+          >
             {QUESTION_TYPES.map((t) => (
               <option key={t} value={t}>
                 {t}

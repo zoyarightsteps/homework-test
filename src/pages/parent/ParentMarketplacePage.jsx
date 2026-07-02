@@ -5,6 +5,7 @@ import {
   browseTopics,
   browseSubtopics,
   getPrice,
+  getPreview,
   getCart,
   addCartItem,
   removeCartItem,
@@ -14,12 +15,40 @@ import { useToast } from '../../context/ToastContext';
 import { getErrorMessage } from '../../utils/getErrorMessage';
 import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
+import Badge from '../../components/ui/Badge';
+import Modal from '../../components/ui/Modal';
 import { Select } from '../../components/ui/Field';
 import EmptyState from '../../components/ui/EmptyState';
 import Spinner from '../../components/ui/Spinner';
 
 function formatPence(p) {
   return p != null ? `£${(p / 100).toFixed(2)}` : '—';
+}
+
+function BuyLevelRow({ label, price, disabled, onAdd, onPreview }) {
+  return (
+    <div className="flex items-center justify-between rounded-lg bg-blue-50 p-3 text-sm text-blue-800">
+      <div>
+        <div className="font-medium">{label}</div>
+        {price ? (
+          <div className="text-xs">
+            {formatPence(price.finalPrice)}
+            {price.discountPercentage ? ` (${price.discountPercentage}% off)` : ''}
+          </div>
+        ) : (
+          <div className="text-xs text-blue-400">Calculating price…</div>
+        )}
+      </div>
+      <div className="flex gap-2">
+        <Button variant="secondary" size="sm" disabled={!price} onClick={onPreview}>
+          Preview
+        </Button>
+        <Button size="sm" disabled={disabled || !price} onClick={onAdd}>
+          Add to Cart
+        </Button>
+      </div>
+    </div>
+  );
 }
 
 export default function ParentMarketplacePage() {
@@ -33,10 +62,16 @@ export default function ParentMarketplacePage() {
   const [topicId, setTopicId] = useState('');
   const [subtopics, setSubtopics] = useState([]);
   const [subTopicId, setSubTopicId] = useState('');
-  const [price, setPrice] = useState(null);
+
+  const [subjectPrice, setSubjectPrice] = useState(null);
+  const [topicPrice, setTopicPrice] = useState(null);
+  const [subtopicPrice, setSubtopicPrice] = useState(null);
 
   const [cart, setCart] = useState(null);
   const [loadingCart, setLoadingCart] = useState(true);
+
+  const [preview, setPreview] = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
 
   const selectedChild = children.find((c) => c.id === childId);
   const yearGroupId = selectedChild?.yearGroupId;
@@ -77,12 +112,31 @@ export default function ParentMarketplacePage() {
     browseSubtopics({ topicId }).then((data) => setSubtopics(data.subTopics || []));
   }, [topicId]);
 
+  // Each level is only ever selectable from a dropdown that already excludes
+  // entities with no published questions, so no separate "has content" check is needed —
+  // being selected here is proof it can be bought and previewed.
   useEffect(() => {
-    setPrice(null);
+    setSubjectPrice(null);
+    if (!subjectId || !yearGroupId) return;
+    getPrice({ type: 'SUBJECT', entityId: subjectId, yearGroupId })
+      .then(setSubjectPrice)
+      .catch(() => setSubjectPrice(null));
+  }, [subjectId, yearGroupId]);
+
+  useEffect(() => {
+    setTopicPrice(null);
+    if (!topicId || !yearGroupId) return;
+    getPrice({ type: 'TOPIC', entityId: topicId, yearGroupId })
+      .then(setTopicPrice)
+      .catch(() => setTopicPrice(null));
+  }, [topicId, yearGroupId]);
+
+  useEffect(() => {
+    setSubtopicPrice(null);
     if (!subTopicId || !yearGroupId) return;
     getPrice({ type: 'SUBTOPIC', entityId: subTopicId, yearGroupId })
-      .then(setPrice)
-      .catch(() => setPrice(null));
+      .then(setSubtopicPrice)
+      .catch(() => setSubtopicPrice(null));
   }, [subTopicId, yearGroupId]);
 
   function refreshCart() {
@@ -93,10 +147,11 @@ export default function ParentMarketplacePage() {
       .finally(() => setLoadingCart(false));
   }
 
-  const handleAddToCart = async () => {
+  const handleAddToCart = async (type, entityId) => {
     try {
-      await addCartItem({ type: 'SUBTOPIC', entityId: subTopicId, childId });
+      await addCartItem({ type, entityId, childId });
       toast.success('Added to cart');
+      setPreview(null);
       refreshCart();
     } catch (err) {
       toast.error(getErrorMessage(err));
@@ -125,6 +180,20 @@ export default function ParentMarketplacePage() {
       }
     } catch (err) {
       toast.error(getErrorMessage(err));
+    }
+  };
+
+  const openPreview = async (type, entityId, label, price) => {
+    setPreviewLoading(true);
+    setPreview({ type, entityId, label, price, data: null });
+    try {
+      const data = await getPreview({ type, entityId, yearGroupId });
+      setPreview({ type, entityId, label, price, data });
+    } catch (err) {
+      toast.error(getErrorMessage(err));
+      setPreview(null);
+    } finally {
+      setPreviewLoading(false);
     }
   };
 
@@ -157,6 +226,15 @@ export default function ParentMarketplacePage() {
               </option>
             ))}
           </Select>
+          {subjectId && (
+            <BuyLevelRow
+              label="Buy the whole subject"
+              price={subjectPrice}
+              disabled={!childId}
+              onAdd={() => handleAddToCart('SUBJECT', subjectId)}
+              onPreview={() => openPreview('SUBJECT', subjectId, 'Whole subject', subjectPrice)}
+            />
+          )}
 
           <Select label="Topic" value={topicId} disabled={!subjectId} onChange={(e) => setTopicId(e.target.value)}>
             <option value="">Select topic…</option>
@@ -166,6 +244,18 @@ export default function ParentMarketplacePage() {
               </option>
             ))}
           </Select>
+          {subjectId && topics.length === 0 && (
+            <p className="text-xs text-slate-400">No individual topics on their own — the whole-subject bundle above covers everything.</p>
+          )}
+          {topicId && (
+            <BuyLevelRow
+              label="Buy the whole topic"
+              price={topicPrice}
+              disabled={!childId}
+              onAdd={() => handleAddToCart('TOPIC', topicId)}
+              onPreview={() => openPreview('TOPIC', topicId, 'Whole topic', topicPrice)}
+            />
+          )}
 
           <Select label="Subtopic" value={subTopicId} disabled={!topicId} onChange={(e) => setSubTopicId(e.target.value)}>
             <option value="">Select subtopic…</option>
@@ -175,21 +265,22 @@ export default function ParentMarketplacePage() {
               </option>
             ))}
           </Select>
+          {topicId && subtopics.length === 0 && (
+            <p className="text-xs text-slate-400">No individual subtopics on their own — the whole-topic bundle above covers everything.</p>
+          )}
+          {subTopicId && (
+            <BuyLevelRow
+              label="Buy just this subtopic"
+              price={subtopicPrice}
+              disabled={!childId}
+              onAdd={() => handleAddToCart('SUBTOPIC', subTopicId)}
+              onPreview={() => openPreview('SUBTOPIC', subTopicId, 'This subtopic', subtopicPrice)}
+            />
+          )}
 
           {subjects.length === 0 && yearGroupId && (
             <EmptyState title="No published questions yet for this year group" subtitle="Ask an admin to publish some bank questions." />
           )}
-
-          {price && (
-            <div className="rounded-lg bg-blue-50 p-3 text-sm text-blue-800">
-              Price: <strong>{formatPence(price.finalPrice)}</strong>{' '}
-              {price.discountPercentage ? `(${price.discountPercentage}% off)` : ''}
-            </div>
-          )}
-
-          <Button disabled={!subTopicId || !childId} onClick={handleAddToCart}>
-            Add to Cart
-          </Button>
         </Card>
 
         <Card className="p-5">
@@ -204,7 +295,9 @@ export default function ParentMarketplacePage() {
                 <div key={item.id} className="flex items-center justify-between rounded-lg border border-slate-100 p-2 text-sm">
                   <div>
                     <div className="font-medium text-slate-800">{item.label || item.type}</div>
-                    <div className="text-xs text-slate-400">{item.child?.name}</div>
+                    <div className="text-xs text-slate-400">
+                      {item.type} · {item.child?.name}
+                    </div>
                   </div>
                   <div className="text-right">
                     <div className="text-xs text-slate-500">{formatPence(item.pricing?.finalPrice)}</div>
@@ -224,6 +317,52 @@ export default function ParentMarketplacePage() {
           )}
         </Card>
       </div>
+
+      <Modal
+        open={!!preview}
+        onClose={() => setPreview(null)}
+        title={preview ? `Preview — ${preview.label}` : ''}
+        footer={
+          preview && (
+            <>
+              <Button variant="secondary" onClick={() => setPreview(null)}>
+                Close
+              </Button>
+              <Button onClick={() => handleAddToCart(preview.type, preview.entityId)}>Add to Cart</Button>
+            </>
+          )
+        }
+      >
+        {previewLoading ? (
+          <div className="flex items-center justify-center gap-2 py-8 text-slate-400">
+            <Spinner /> Loading preview…
+          </div>
+        ) : preview?.data ? (
+          <div className="space-y-3">
+            <div className="rounded-lg bg-blue-50 p-3 text-sm text-blue-800">
+              <strong>{preview.data.questionCount}</strong> question{preview.data.questionCount === 1 ? '' : 's'} in this bundle
+              · Price: <strong>{formatPence(preview.price?.finalPrice)}</strong>
+              {preview.price?.discountPercentage ? ` (${preview.price.discountPercentage}% off)` : ''}
+            </div>
+            {preview.data.questions?.map((q) => (
+              <div key={q.id} className="rounded-lg border border-slate-100 p-3">
+                <div className="mb-1 flex items-center gap-2">
+                  <Badge className="bg-slate-100 text-slate-600">{q.type}</Badge>
+                  {q.difficulty && <Badge className="bg-slate-100 text-slate-600">{q.difficulty}</Badge>}
+                </div>
+                <p className="text-sm text-slate-800">{q.questionText}</p>
+                {q.options?.length > 0 && (
+                  <ul className="mt-1 list-disc pl-5 text-xs text-slate-500">
+                    {q.options.map((o) => (
+                      <li key={o}>{o}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </Modal>
     </div>
   );
 }

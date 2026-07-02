@@ -3,13 +3,14 @@ import { useNavigate } from 'react-router-dom';
 import { createHomeworkDraft } from '../../services/tutor.service';
 import { useToast } from '../../context/ToastContext';
 import { getErrorMessage } from '../../utils/getErrorMessage';
+import { saveHomeworkCurriculum } from '../../utils/homeworkCurriculumCache';
 import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
 import { Input, Textarea } from '../../components/ui/Field';
 import CurriculumPicker from '../../components/homework/CurriculumPicker';
 
 export default function TutorCreateHomeworkPage() {
-  const [selection, setSelection] = useState({ subjectId: '', topicId: '', subTopicId: '', objectiveId: '' });
+  const [selection, setSelection] = useState({ yearGroupId: '', subjectId: '', topicId: '', subTopicIds: [] });
   const [instructions, setInstructions] = useState('');
   const [estimatedMinutes, setEstimatedMinutes] = useState(30);
   const [saving, setSaving] = useState(false);
@@ -23,11 +24,16 @@ export default function TutorCreateHomeworkPage() {
       const payload = {
         subjectId: selection.subjectId,
         topicId: selection.topicId,
-        subTopicIds: selection.subTopicId ? [selection.subTopicId] : undefined,
+        subTopicIds: selection.subTopicIds?.length ? selection.subTopicIds : undefined,
         instructions: instructions || undefined,
         estimatedMinutes: estimatedMinutes ? Number(estimatedMinutes) : undefined,
       };
       const homework = await createHomeworkDraft(payload);
+      saveHomeworkCurriculum(homework.id, {
+        yearGroupId: selection.yearGroupId,
+        subjectId: selection.subjectId,
+        topicId: selection.topicId,
+      });
       toast.success('Draft created — now add some questions.');
       navigate(`/tutor/homeworks/${homework.id}`);
     } catch (err) {
@@ -49,7 +55,8 @@ export default function TutorCreateHomeworkPage() {
           <CurriculumPicker
             subjectId={selection.subjectId}
             topicId={selection.topicId}
-            subTopicId={selection.subTopicId}
+            subTopicIds={selection.subTopicIds}
+            multiSubTopic
             onChange={setSelection}
           />
         </Card>

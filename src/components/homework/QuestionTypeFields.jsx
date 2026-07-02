@@ -1,7 +1,7 @@
-import { Input, Textarea, Select } from '../ui/Field';
+import { Textarea, Select } from '../ui/Field';
 import Button from '../ui/Button';
 
-function ListEditor({ label, items, onAdd, onRemove, onItemChange, placeholder }) {
+function ListEditor({ label, items, onAdd, onRemove, onItemChange, placeholder, minItems = 0 }) {
   return (
     <div>
       <label className="mb-1 block text-xs font-semibold text-slate-600">{label}</label>
@@ -14,7 +14,7 @@ function ListEditor({ label, items, onAdd, onRemove, onItemChange, placeholder }
               placeholder={placeholder}
               onChange={(e) => onItemChange(idx, e.target.value)}
             />
-            <Button type="button" variant="secondary" size="sm" onClick={() => onRemove(idx)}>
+            <Button type="button" variant="secondary" size="sm" disabled={items.length <= minItems} onClick={() => onRemove(idx)}>
               Remove
             </Button>
           </div>
@@ -22,6 +22,7 @@ function ListEditor({ label, items, onAdd, onRemove, onItemChange, placeholder }
         <Button type="button" variant="ghost" size="sm" onClick={onAdd}>
           + Add item
         </Button>
+        {minItems > 0 && <p className="text-xs text-slate-400">At least {minItems} required.</p>}
       </div>
     </div>
   );
@@ -34,13 +35,29 @@ export default function QuestionTypeFields({ type, value, onChange }) {
   const blankAnswers = value.blankAnswers || [];
   const matchEntries = Object.entries(matchPairs);
 
-  if (type === 'MULTIPLE_CHOICE' || type === 'TRUE_FALSE') {
+  if (type === 'TRUE_FALSE') {
+    return (
+      <Select
+        label="Correct Answer"
+        required
+        value={value.correctOption || ''}
+        onChange={(e) => onChange({ options: ['True', 'False'], correctOption: e.target.value })}
+      >
+        <option value="">Select true or false…</option>
+        <option value="True">True</option>
+        <option value="False">False</option>
+      </Select>
+    );
+  }
+
+  if (type === 'MULTIPLE_CHOICE') {
     return (
       <div className="space-y-3">
         <ListEditor
           label="Options"
           items={options}
           placeholder="Option text"
+          minItems={2}
           onAdd={() => onChange({ options: [...options, ''] })}
           onRemove={(idx) => onChange({ options: options.filter((_, i) => i !== idx) })}
           onItemChange={(idx, v) => onChange({ options: options.map((o, i) => (i === idx ? v : o)) })}
@@ -93,6 +110,7 @@ export default function QuestionTypeFields({ type, value, onChange }) {
                 type="button"
                 variant="secondary"
                 size="sm"
+                disabled={matchEntries.length <= 2}
                 onClick={() => onChange({ matchPairs: Object.fromEntries(matchEntries.filter((_, i) => i !== idx)) })}
               >
                 Remove
@@ -107,6 +125,7 @@ export default function QuestionTypeFields({ type, value, onChange }) {
           >
             + Add pair
           </Button>
+          <p className="text-xs text-slate-400">At least 2 pairs required.</p>
         </div>
       </div>
     );
@@ -118,6 +137,7 @@ export default function QuestionTypeFields({ type, value, onChange }) {
         label="Order Items (in correct order)"
         items={orderItems}
         placeholder="Step text"
+        minItems={2}
         onAdd={() => onChange({ orderItems: [...orderItems, ''] })}
         onRemove={(idx) => onChange({ orderItems: orderItems.filter((_, i) => i !== idx) })}
         onItemChange={(idx, v) => onChange({ orderItems: orderItems.map((o, i) => (i === idx ? v : o)) })}
@@ -131,6 +151,7 @@ export default function QuestionTypeFields({ type, value, onChange }) {
         label="Blank Answers (one per ___ in the text above, left to right)"
         items={blankAnswers}
         placeholder="Correct answer for this blank"
+        minItems={1}
         onAdd={() => onChange({ blankAnswers: [...blankAnswers, ''] })}
         onRemove={(idx) => onChange({ blankAnswers: blankAnswers.filter((_, i) => i !== idx) })}
         onItemChange={(idx, v) => onChange({ blankAnswers: blankAnswers.map((o, i) => (i === idx ? v : o)) })}
