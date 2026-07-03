@@ -19,6 +19,7 @@ import ParentChildrenPage from './pages/parent/ParentChildrenPage';
 import ParentChildHomeworkListPage from './pages/parent/ParentChildHomeworkListPage';
 import ParentHomeworkAnswerPage from './pages/parent/ParentHomeworkAnswerPage';
 import ParentMarketplacePage from './pages/parent/ParentMarketplacePage';
+import ParentPurchasesPage from './pages/parent/ParentPurchasesPage';
 
 export default function App() {
   return (
@@ -64,6 +65,7 @@ export default function App() {
           >
             <Route index element={<ParentChildrenPage />} />
             <Route path="marketplace" element={<ParentMarketplacePage />} />
+            <Route path="purchases" element={<ParentPurchasesPage />} />
             <Route path="children/:childId" element={<ParentChildHomeworkListPage />} />
             <Route path="children/:childId/homeworks/:homeworkId" element={<ParentHomeworkAnswerPage />} />
           </Route>

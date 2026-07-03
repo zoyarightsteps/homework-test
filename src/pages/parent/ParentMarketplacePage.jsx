@@ -20,33 +20,44 @@ import Modal from '../../components/ui/Modal';
 import { Select } from '../../components/ui/Field';
 import EmptyState from '../../components/ui/EmptyState';
 import Spinner from '../../components/ui/Spinner';
+import ReviewsPanel from '../../components/marketplace/ReviewsPanel';
 
 function formatPence(p) {
   return p != null ? `£${(p / 100).toFixed(2)}` : '—';
 }
 
-function BuyLevelRow({ label, price, disabled, onAdd, onPreview }) {
+function BuyLevelRow({ label, price, disabled, onAdd, onPreview, bundleType, entityId, reviewsOpen, onToggleReviews }) {
   return (
-    <div className="flex items-center justify-between rounded-lg bg-blue-50 p-3 text-sm text-blue-800">
-      <div>
-        <div className="font-medium">{label}</div>
-        {price ? (
-          <div className="text-xs">
-            {formatPence(price.finalPrice)}
-            {price.discountPercentage ? ` (${price.discountPercentage}% off)` : ''}
-          </div>
-        ) : (
-          <div className="text-xs text-blue-400">Calculating price…</div>
-        )}
+    <div className="rounded-lg bg-blue-50 p-3 text-sm text-blue-800">
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="font-medium">{label}</div>
+          {price ? (
+            <div className="text-xs">
+              {formatPence(price.finalPrice)}
+              {price.discountPercentage ? ` (${price.discountPercentage}% off)` : ''}
+            </div>
+          ) : (
+            <div className="text-xs text-blue-400">Calculating price…</div>
+          )}
+        </div>
+        <div className="flex gap-2">
+          <Button variant="secondary" size="sm" onClick={onToggleReviews}>
+            {reviewsOpen ? 'Hide reviews' : 'Reviews'}
+          </Button>
+          <Button variant="secondary" size="sm" disabled={!price} onClick={onPreview}>
+            Preview
+          </Button>
+          <Button size="sm" disabled={disabled || !price} onClick={onAdd}>
+            Add to Cart
+          </Button>
+        </div>
       </div>
-      <div className="flex gap-2">
-        <Button variant="secondary" size="sm" disabled={!price} onClick={onPreview}>
-          Preview
-        </Button>
-        <Button size="sm" disabled={disabled || !price} onClick={onAdd}>
-          Add to Cart
-        </Button>
-      </div>
+      {reviewsOpen && (
+        <div className="mt-3 border-t border-blue-100 pt-3">
+          <ReviewsPanel bundleType={bundleType} entityId={entityId} canWrite={false} />
+        </div>
+      )}
     </div>
   );
 }
@@ -72,6 +83,7 @@ export default function ParentMarketplacePage() {
 
   const [preview, setPreview] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [openReviewsFor, setOpenReviewsFor] = useState(null);
 
   const selectedChild = children.find((c) => c.id === childId);
   const yearGroupId = selectedChild?.yearGroupId;
@@ -233,6 +245,10 @@ export default function ParentMarketplacePage() {
               disabled={!childId}
               onAdd={() => handleAddToCart('SUBJECT', subjectId)}
               onPreview={() => openPreview('SUBJECT', subjectId, 'Whole subject', subjectPrice)}
+              bundleType="SUBJECT"
+              entityId={subjectId}
+              reviewsOpen={openReviewsFor === `SUBJECT:${subjectId}`}
+              onToggleReviews={() => setOpenReviewsFor(openReviewsFor === `SUBJECT:${subjectId}` ? null : `SUBJECT:${subjectId}`)}
             />
           )}
 
@@ -254,6 +270,10 @@ export default function ParentMarketplacePage() {
               disabled={!childId}
               onAdd={() => handleAddToCart('TOPIC', topicId)}
               onPreview={() => openPreview('TOPIC', topicId, 'Whole topic', topicPrice)}
+              bundleType="TOPIC"
+              entityId={topicId}
+              reviewsOpen={openReviewsFor === `TOPIC:${topicId}`}
+              onToggleReviews={() => setOpenReviewsFor(openReviewsFor === `TOPIC:${topicId}` ? null : `TOPIC:${topicId}`)}
             />
           )}
 
@@ -275,6 +295,10 @@ export default function ParentMarketplacePage() {
               disabled={!childId}
               onAdd={() => handleAddToCart('SUBTOPIC', subTopicId)}
               onPreview={() => openPreview('SUBTOPIC', subTopicId, 'This subtopic', subtopicPrice)}
+              bundleType="SUBTOPIC"
+              entityId={subTopicId}
+              reviewsOpen={openReviewsFor === `SUBTOPIC:${subTopicId}`}
+              onToggleReviews={() => setOpenReviewsFor(openReviewsFor === `SUBTOPIC:${subTopicId}` ? null : `SUBTOPIC:${subTopicId}`)}
             />
           )}
 

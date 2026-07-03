@@ -1919,12 +1919,15 @@ paths:
   /homework/parent/marketplace/preview:
     get:
       tags: [Homework — Parent Marketplace]
-      summary: Preview questions in a question bank bundle before purchase
+      summary: Preview a sample of questions from a bundle before purchase
       description: |
-        Returns the number of questions and a list of them (without answers)
-        for a subtopic, topic, or subject bundle — so a parent can see what
-        they're buying before checkout, alongside the price from
-        `/homework/parent/marketplace/price`.
+        Returns the **total question count** for the bundle and a **small sample**
+        (up to 2 questions) so the parent can get a feel for the content before
+        buying. Answers, options, and answer keys are not included.
+        Use alongside `/homework/parent/marketplace/price` to show both price
+        and a teaser before checkout.
+      security:
+        - bearerAuth: []
       parameters:
         - in: query
           name: type
@@ -1964,9 +1967,12 @@ paths:
                         type: string
                       questionCount:
                         type: integer
-                        example: 12
+                        description: Total number of questions in the full bundle
+                        example: 47
                       questions:
                         type: array
+                        description: Sample of up to 2 questions — no answers or options included
+                        maxItems: 2
                         items:
                           type: object
                           properties:
@@ -1974,12 +1980,9 @@ paths:
                               type: string
                             type:
                               type: string
+                              enum: [MULTIPLE_CHOICE, SHORT_ANSWER, LONG_ANSWER, FILL_BLANK, MATCH, TRUE_FALSE, ORDERING, READING_COMPREHENSION, VIDEO]
                             questionText:
                               type: string
-                            options:
-                              type: array
-                              items:
-                                type: string
                             examBoard:
                               type: string
                               nullable: true
@@ -1989,12 +1992,10 @@ paths:
                             difficulty:
                               type: string
                               nullable: true
-                            subTopicId:
-                              type: string
         '401':
           description: Unauthenticated
         '403':
-          description: Not a parent
+          description: Not a parent or no active subscription
 
   /homework/parent/marketplace/subjects:
     get:
@@ -2239,7 +2240,9 @@ paths:
     get:
       tags: [Homework — Parent Marketplace]
       summary: Get purchase history
-      description: Paginated list of all question bank purchases made by this parent, ordered newest first.
+      description: Paginated list of completed question bank purchases made by this parent, ordered newest first. Only purchases with paymentStatus COMPLETED are returned.
+      security:
+        - bearerAuth: []
       parameters:
         - in: query
           name: page
@@ -2282,7 +2285,8 @@ paths:
                               example: GBP
                             paymentStatus:
                               type: string
-                              enum: [PENDING, COMPLETED, FAILED, REFUNDED]
+                              enum: [COMPLETED]
+                              description: Always COMPLETED — pending and failed purchases are excluded
                             purchasedAt:
                               type: string
                               format: date-time
@@ -2292,7 +2296,6 @@ paths:
                               nullable: true
                             child:
                               type: object
-                              nullable: true
                               properties:
                                 id:
                                   type: string
@@ -2302,17 +2305,19 @@ paths:
                                   type: string
                             yearGroup:
                               type: object
-                              nullable: true
                               properties:
                                 id:
                                   type: string
                                 code:
                                   type: string
+                                  example: Y9
                                 name:
                                   type: string
+                                  example: Year 9
                             subTopic:
                               type: object
                               nullable: true
+                              description: Populated when purchase type is SUBTOPIC, null otherwise
                               properties:
                                 id:
                                   type: string
@@ -2321,6 +2326,7 @@ paths:
                             topic:
                               type: object
                               nullable: true
+                              description: Populated when purchase type is TOPIC or SUBTOPIC, null otherwise
                               properties:
                                 id:
                                   type: string
@@ -2329,6 +2335,7 @@ paths:
                             subject:
                               type: object
                               nullable: true
+                              description: Populated for all purchase types
                               properties:
                                 id:
                                   type: string
@@ -2337,18 +2344,279 @@ paths:
                       pagination:
                         type: object
                         properties:
+                          total:
+                            type: integer
                           page:
                             type: integer
                           limit:
                             type: integer
-                          total:
-                            type: integer
-                          totalPages:
-                            type: integer
+                          hasNextPage:
+                            type: boolean
         '401':
           description: Unauthenticated
         '403':
-          description: Not a parent
+          description: Not a parent or no active subscription
+
+  /homework/parent/marketplace/reviews:
+    get:
+      tags: [Homework — Parent Marketplace]
+      summary: Get reviews for a bundle
+      description: |
+        Returns paginated reviews and aggregate rating for a question bank bundle.
+        Only active reviews are returned. Includes averageRating and totalReviews for display on listing cards.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: bundleType
+          required: true
+          schema:
+            type: string
+            enum: [SUBTOPIC, TOPIC, SUBJECT]
+        - in: query
+          name: entityId
+          required: true
+          schema:
+            type: string
+          description: The id of the subtopic, topic, or subject being reviewed
+        - in: query
+          name: page
+          schema:
+            type: integer
+            default: 1
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 10
+      responses:
+        '200':
+          description: Reviews and aggregate rating
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      averageRating:
+                        type: number
+                        nullable: true
+                        example: 4.3
+                        description: Average star rating rounded to 1 decimal place. Null if no reviews yet.
+                      totalReviews:
+                        type: integer
+                        example: 28
+                        description: Total number of active reviews for this bundle
+                      reviews:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: string
+                            rating:
+                              type: integer
+                              minimum: 1
+                              maximum: 5
+                            reviewText:
+                              type: string
+                              nullable: true
+                            reviewerName:
+                              type: string
+                              example: Sarah
+                              description: First name only. Shown as Anonymous if review was deleted via GDPR request.
+                            childYearGroup:
+                              type: string
+                              example: Year 9
+                              description: Year group of the child at time of purchase
+                            createdAt:
+                              type: string
+                              format: date-time
+                      pagination:
+                        type: object
+                        properties:
+                          total:
+                            type: integer
+                          page:
+                            type: integer
+                          limit:
+                            type: integer
+                          hasNextPage:
+                            type: boolean
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Not a parent or no active subscription
+
+    post:
+      tags: [Homework — Parent Marketplace]
+      summary: Submit a review for a purchased bundle
+      description: |
+        Submit a star rating and optional written review for a question bank bundle.
+
+        Rules:
+        - Parent must have a completed purchase for this bundle
+        - One review per parent per bundle — returns 409 if already reviewed
+        - Review goes live immediately (no moderation queue)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bundleType, entityId, rating]
+              properties:
+                bundleType:
+                  type: string
+                  enum: [SUBTOPIC, TOPIC, SUBJECT]
+                entityId:
+                  type: string
+                  description: The id of the subtopic, topic, or subject being reviewed
+                rating:
+                  type: integer
+                  minimum: 1
+                  maximum: 5
+                reviewText:
+                  type: string
+                  maxLength: 500
+                  description: Optional written review
+      responses:
+        '201':
+          description: Review submitted and live
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      review:
+                        type: object
+                        properties:
+                          id:
+                            type: string
+                          rating:
+                            type: integer
+                          reviewText:
+                            type: string
+                            nullable: true
+                          reviewerName:
+                            type: string
+                          childYearGroup:
+                            type: string
+                          createdAt:
+                            type: string
+                            format: date-time
+        '403':
+          description: No completed purchase found for this bundle
+        '409':
+          description: Parent has already reviewed this bundle
+
+  /homework/parent/marketplace/reviews/edit:
+    post:
+      tags: [Homework — Parent Marketplace]
+      summary: Edit an existing review
+      description: |
+        Update rating and/or review text on a review the parent has already submitted.
+        Updated review goes live immediately.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bundleType, entityId, rating]
+              properties:
+                bundleType:
+                  type: string
+                  enum: [SUBTOPIC, TOPIC, SUBJECT]
+                entityId:
+                  type: string
+                rating:
+                  type: integer
+                  minimum: 1
+                  maximum: 5
+                reviewText:
+                  type: string
+                  maxLength: 500
+      responses:
+        '200':
+          description: Review updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      review:
+                        type: object
+                        properties:
+                          id:
+                            type: string
+                          rating:
+                            type: integer
+                          reviewText:
+                            type: string
+                            nullable: true
+                          reviewerName:
+                            type: string
+                          childYearGroup:
+                            type: string
+                          updatedAt:
+                            type: string
+                            format: date-time
+        '404':
+          description: Review not found
+
+  /homework/parent/marketplace/reviews/delete:
+    post:
+      tags: [Homework — Parent Marketplace]
+      summary: Delete own review
+      description: |
+        Soft-deletes the parent's review for a bundle.
+
+        On deletion:
+        - Review is hidden from all public listings
+        - Review text is cleared
+        - Reviewer name is replaced with "Anonymous"
+        - The star rating is no longer counted in the aggregate
+
+        This endpoint satisfies GDPR deletion requests for review content.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bundleType, entityId]
+              properties:
+                bundleType:
+                  type: string
+                  enum: [SUBTOPIC, TOPIC, SUBJECT]
+                entityId:
+                  type: string
+      responses:
+        '200':
+          description: Review deleted
+        '404':
+          description: Review not found
 
   /homework/parent/marketplace/access:
     get:

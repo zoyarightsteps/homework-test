@@ -32,6 +32,18 @@ const removeCartItem = (cartItemId) =>
 const checkoutCart = (payload) =>
   axiosClient.post('/homework/parent/marketplace/cart/checkout', payload).then((res) => res.data.data);
 
+const getReviews = (params) =>
+  axiosClient.get('/homework/parent/marketplace/reviews', { params }).then((res) => res.data.data);
+
+const submitReview = (payload) =>
+  axiosClient.post('/homework/parent/marketplace/reviews', payload).then((res) => res.data.data);
+
+const editReview = (payload) =>
+  axiosClient.post('/homework/parent/marketplace/reviews/edit', payload).then((res) => res.data.data);
+
+const deleteReview = (payload) =>
+  axiosClient.post('/homework/parent/marketplace/reviews/delete', payload).then((res) => res.data.data);
+
 export {
   getPrice,
   getPreview,
@@ -44,4 +56,8 @@ export {
   addCartItem,
   removeCartItem,
   checkoutCart,
+  getReviews,
+  submitReview,
+  editReview,
+  deleteReview,
 };

@@ -3,6 +3,7 @@ import AppLayout from '../../components/layout/AppLayout';
 const links = [
   { to: '/parent', label: 'My Children', end: true },
   { to: '/parent/marketplace', label: 'Marketplace' },
+  { to: '/parent/purchases', label: 'My Purchases' },
 ];
 
 export default function ParentLayout() {
