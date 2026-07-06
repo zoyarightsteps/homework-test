@@ -44,6 +44,15 @@ const editReview = (payload) =>
 const deleteReview = (payload) =>
   axiosClient.post('/homework/parent/marketplace/reviews/delete', payload).then((res) => res.data.data);
 
+const browseBundles = (params) =>
+  axiosClient.get('/homework/parent/marketplace/bundles', { params }).then((res) => res.data.data);
+
+const getBundleDetail = (type, id, params) =>
+  axiosClient.get(`/homework/parent/marketplace/bundles/${type}/${id}`, { params }).then((res) => res.data.data);
+
+const getAlsoBought = (params) =>
+  axiosClient.get('/homework/parent/marketplace/also-bought', { params }).then((res) => res.data.data);
+
 export {
   getPrice,
   getPreview,
@@ -60,4 +69,7 @@ export {
   submitReview,
   editReview,
   deleteReview,
+  browseBundles,
+  getBundleDetail,
+  getAlsoBought,
 };

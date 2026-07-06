@@ -36,7 +36,7 @@ tags:
   - name: Homework — Question Bank
     description: Browse published bank questions (active subscription required)
   - name: Homework — Parent Marketplace
-    description: Parent browse, purchase, and cart flow for the question bank
+    description: Parent marketplace listing, bundle detail, purchase, and cart flow for the question bank
   - name: Homework — Admin
     description: Admin endpoints for managing the question bank
 
@@ -48,6 +48,122 @@ components:
       bearerFormat: JWT
 
   schemas:
+    AlsoBoughtBundle:
+      type: object
+      properties:
+        bundleType:
+          type: string
+          enum: [SUBTOPIC, TOPIC, SUBJECT]
+        entityId:
+          type: string
+          description: ID of the subtopic, topic, or subject
+        name:
+          type: string
+          nullable: true
+          description: Display name of the bundle
+        buyerCount:
+          type: integer
+          description: Number of purchases used to derive this recommendation
+        avgPricePence:
+          type: integer
+          description: Average price paid for this bundle in pence (GBP)
+
+    MarketplaceBundleCard:
+      type: object
+      description: A question bank bundle card in the marketplace listing
+      properties:
+        bundleType:
+          type: string
+          enum: [SUBTOPIC, TOPIC, SUBJECT]
+        entityId:
+          type: string
+          description: ID of the subtopic, topic, or subject
+        name:
+          type: string
+          example: Linear Equations
+        subjectName:
+          type: string
+          example: Mathematics
+        subjectId:
+          type: string
+        yearGroupName:
+          type: string
+          description: Child's year group — derived from childId
+          example: Year 7
+        questionCount:
+          type: integer
+          example: 12
+        pricePence:
+          type: integer
+          description: Total price before discount (pence)
+          example: 1200
+        discountPct:
+          type: integer
+          description: Discount percentage — SUBTOPIC 0%, TOPIC 10%, SUBJECT 20%
+          example: 10
+        discountPence:
+          type: integer
+          description: Discount amount in pence
+          example: 120
+        finalPricePence:
+          type: integer
+          description: Price after discount in pence
+          example: 1080
+        averageRating:
+          type: number
+          nullable: true
+          description: Average rating rounded to 1 decimal place. Null if no reviews yet.
+          example: 4.3
+        totalReviews:
+          type: integer
+          example: 8
+        buyerCount:
+          type: integer
+          description: Number of completed purchases for this bundle
+          example: 23
+
+    PreviewQuestion:
+      type: object
+      description: Condensed question shown in bundle detail preview (no answers)
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [MULTIPLE_CHOICE, SHORT_ANSWER, LONG_ANSWER, FILL_BLANK, MATCH, TRUE_FALSE, ORDERING, READING_COMPREHENSION, VIDEO]
+        questionText:
+          type: string
+        difficulty:
+          type: string
+          nullable: true
+          enum: [FOUNDATION, STANDARD, HIGHER, STRETCH]
+        examBoard:
+          type: string
+          nullable: true
+          enum: [EDEXCEL, AQA, OCR, WJEC, CAMBRIDGE, IB, NONE]
+
+    BundleReview:
+      type: object
+      properties:
+        id:
+          type: string
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+        reviewText:
+          type: string
+          nullable: true
+        reviewerName:
+          type: string
+          example: Sarah
+        childYearGroup:
+          type: string
+          example: Year 9
+        createdAt:
+          type: string
+          format: date-time
+
     Pagination:
       type: object
       properties:
@@ -2460,7 +2576,8 @@ paths:
 
         Rules:
         - Parent must have a completed purchase for this bundle
-        - One review per parent per bundle — returns 409 if already reviewed
+        - One active review per parent per bundle — returns 409 if already reviewed
+        - If a parent deletes their review they can re-submit a new one
         - Review goes live immediately (no moderation queue)
       security:
         - bearerAuth: []
@@ -2617,6 +2734,391 @@ paths:
           description: Review deleted
         '404':
           description: Review not found
+
+  /homework/parent/marketplace/also-bought:
+    get:
+      tags: [Homework — Parent Marketplace]
+      summary: Get homework bundles related to a course or content item
+      description: |
+        Returns two lists of question bank bundles to display on a course/content detail page:
+
+        **peopleBought** — Collaborative filtering. Bundles that other parents who purchased
+        this same course/content also bought. May be empty if purchase data is sparse.
+
+        **subjectBundles** — Subject-based recommendations. All bundles in the same subject(s)
+        as the course/content, sorted by popularity (most purchased first). Always returns
+        data as long as the course subject has a `subjectId` FK set.
+
+        Both lists return at most `limit` items (default 6). Results are Redis-cached for 1 hour.
+
+        **Note for courses:** `subjectBundles` only works when the `CourseSubject.subjectId`
+        FK is set (via `POST /v1/courses/:courseId/subjects` with a `subjectId` field).
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: entityType
+          required: true
+          schema:
+            type: string
+            enum: [COURSE, CONTENT]
+        - in: query
+          name: entityId
+          required: true
+          schema:
+            type: string
+          description: ID of the course or content item
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 6
+            maximum: 20
+          description: Max results in each list
+      responses:
+        '200':
+          description: Bundle recommendations retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      peopleBought:
+                        type: array
+                        description: Bundles bought by other purchasers of this item (may be empty)
+                        items:
+                          $ref: '#/components/schemas/AlsoBoughtBundle'
+                      subjectBundles:
+                        type: array
+                        description: Popular bundles in the same subject (always populated when subjectId is set)
+                        items:
+                          $ref: '#/components/schemas/AlsoBoughtBundle'
+              example:
+                success: true
+                data:
+                  peopleBought:
+                    - bundleType: SUBTOPIC
+                      entityId: cmpd83sou000v0llynqm9e86g
+                      name: Cells and Organisation
+                      buyerCount: 8
+                      avgPricePence: 299
+                  subjectBundles:
+                    - bundleType: TOPIC
+                      entityId: cmpd83sog000u0llygl6irfgi
+                      name: Biology Fundamentals
+                      buyerCount: 15
+                      avgPricePence: 899
+                    - bundleType: SUBJECT
+                      entityId: cmpd83so4000t0llyo7nywpu1
+                      name: Science
+                      buyerCount: 22
+                      avgPricePence: 1999
+        '400':
+          description: Invalid entityType or entityId
+        '401':
+          description: Unauthenticated
+
+  /homework/parent/marketplace/bundles:
+    get:
+      tags: [Homework — Parent Marketplace]
+      summary: Browse marketplace bundles for a child
+      description: |
+        Returns a paginated, enriched flat listing of question bank bundles (SUBTOPIC, TOPIC, and/or SUBJECT)
+        relevant to the child's year group. The year group is derived automatically from `childId`.
+
+        Each card includes pricing (with discount), aggregated ratings, and buyer count.
+
+        **Pricing tiers:**
+        - `SUBTOPIC` — 0% discount
+        - `TOPIC` — 10% discount
+        - `SUBJECT` — 20% discount (questions scoped to child's year group)
+
+        Results are Redis-cached per child and filter combination for 1 hour.
+      parameters:
+        - in: query
+          name: childId
+          required: true
+          schema:
+            type: string
+          description: Child ID — used to derive year group and verify parent ownership
+        - in: query
+          name: bundleType
+          schema:
+            type: string
+            enum: [SUBTOPIC, TOPIC, SUBJECT]
+          description: Filter to a specific bundle type. Omit to return all three types.
+        - in: query
+          name: subjectId
+          schema:
+            type: string
+          description: Filter to bundles in a specific subject
+        - in: query
+          name: sortBy
+          schema:
+            type: string
+            enum: [popular, rating, price_low, price_high, name]
+            default: popular
+        - in: query
+          name: page
+          schema:
+            type: integer
+            default: 1
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 20
+            maximum: 50
+      responses:
+        '200':
+          description: Paginated marketplace bundles
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/MarketplaceBundleCard'
+                      pagination:
+                        type: object
+                        properties:
+                          total:
+                            type: integer
+                          page:
+                            type: integer
+                          limit:
+                            type: integer
+                          totalPages:
+                            type: integer
+              example:
+                success: true
+                data:
+                  items:
+                    - bundleType: SUBTOPIC
+                      entityId: cmst1abc0001r4ujxiqej3no
+                      name: Linear Equations
+                      subjectName: Mathematics
+                      subjectId: cmsub1abc0001r4ujxiqej3no
+                      yearGroupName: Year 7
+                      questionCount: 12
+                      pricePence: 1200
+                      discountPct: 0
+                      discountPence: 0
+                      finalPricePence: 1200
+                      averageRating: 4.3
+                      totalReviews: 8
+                      buyerCount: 23
+                    - bundleType: TOPIC
+                      entityId: cmtopic1abc0001r4ujxiqej3no
+                      name: Algebra
+                      subjectName: Mathematics
+                      subjectId: cmsub1abc0001r4ujxiqej3no
+                      yearGroupName: Year 7
+                      questionCount: 47
+                      pricePence: 4700
+                      discountPct: 10
+                      discountPence: 470
+                      finalPricePence: 4230
+                      averageRating: null
+                      totalReviews: 0
+                      buyerCount: 15
+                  pagination:
+                    total: 34
+                    page: 1
+                    limit: 20
+                    totalPages: 2
+        '400':
+          description: Child has no year group assigned
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Not a parent, no active subscription, or child does not belong to parent
+        '404':
+          description: Child not found
+
+  /homework/parent/marketplace/bundles/{type}/{id}:
+    get:
+      tags: [Homework — Parent Marketplace]
+      summary: Get full detail for a single marketplace bundle
+      description: |
+        Returns complete detail for a SUBTOPIC, TOPIC, or SUBJECT bundle including:
+        - Full entity info (name, description, code, parent topic/subject context)
+        - Pricing with discount
+        - Up to 5 recent reviews with aggregate rating
+        - 2 preview questions (no answers/options)
+        - Buyer count
+
+        For TOPIC bundles, also returns a list of subtopics included.
+
+        `childId` is required to scope SUBJECT-level pricing to the child's year group.
+        Results are Redis-cached per bundle + child for 1 hour.
+      parameters:
+        - in: path
+          name: type
+          required: true
+          schema:
+            type: string
+            enum: [SUBTOPIC, TOPIC, SUBJECT]
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: Entity ID (cuid) of the subtopic, topic, or subject
+        - in: query
+          name: childId
+          required: true
+          schema:
+            type: string
+          description: Child ID — used to scope SUBJECT pricing and verify parent ownership
+      responses:
+        '200':
+          description: Bundle detail
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      bundleType:
+                        type: string
+                        enum: [SUBTOPIC, TOPIC, SUBJECT]
+                      entityId:
+                        type: string
+                      name:
+                        type: string
+                      description:
+                        type: string
+                        nullable: true
+                      code:
+                        type: string
+                      subjectName:
+                        type: string
+                      subjectId:
+                        type: string
+                      yearGroupName:
+                        type: string
+                      topicName:
+                        type: string
+                        nullable: true
+                        description: Present for SUBTOPIC bundles only
+                      topicId:
+                        type: string
+                        nullable: true
+                        description: Present for SUBTOPIC bundles only
+                      subTopics:
+                        type: array
+                        nullable: true
+                        description: Present for TOPIC bundles only — subtopics included in this bundle
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: string
+                            name:
+                              type: string
+                            code:
+                              type: string
+                      questionCount:
+                        type: integer
+                        example: 12
+                      pricePence:
+                        type: integer
+                        example: 1200
+                      discountPct:
+                        type: integer
+                        example: 0
+                      discountPence:
+                        type: integer
+                        example: 0
+                      finalPricePence:
+                        type: integer
+                        example: 1200
+                      currency:
+                        type: string
+                        example: GBP
+                      buyerCount:
+                        type: integer
+                        example: 23
+                      averageRating:
+                        type: number
+                        nullable: true
+                        example: 4.3
+                      totalReviews:
+                        type: integer
+                        example: 28
+                      recentReviews:
+                        type: array
+                        description: Up to 5 most recent reviews
+                        items:
+                          $ref: '#/components/schemas/BundleReview'
+                      previewQuestions:
+                        type: array
+                        description: Up to 2 preview questions (no answers)
+                        items:
+                          $ref: '#/components/schemas/PreviewQuestion'
+              examples:
+                subtopicDetail:
+                  summary: SUBTOPIC bundle detail
+                  value:
+                    success: true
+                    data:
+                      bundleType: SUBTOPIC
+                      entityId: cmst1abc0001r4ujxiqej3no
+                      name: Linear Equations
+                      description: Solving one-variable linear equations
+                      code: ALG-01
+                      subjectName: Mathematics
+                      subjectId: cmsub1abc0001r4ujxiqej3no
+                      yearGroupName: Year 7
+                      topicName: Algebra
+                      topicId: cmtopic1abc0001r4ujxiqej3no
+                      questionCount: 12
+                      pricePence: 1200
+                      discountPct: 0
+                      discountPence: 0
+                      finalPricePence: 1200
+                      currency: GBP
+                      buyerCount: 23
+                      averageRating: 4.3
+                      totalReviews: 8
+                      recentReviews:
+                        - id: cmrev1abc
+                          rating: 5
+                          reviewText: Excellent variety of questions
+                          reviewerName: Sarah
+                          childYearGroup: Year 7
+                          createdAt: '2026-06-15T10:00:00.000Z'
+                      previewQuestions:
+                        - id: cmq1abc
+                          type: MULTIPLE_CHOICE
+                          questionText: Solve for x when 2x + 3 = 11
+                          difficulty: STANDARD
+                          examBoard: AQA
+        '400':
+          description: Child has no year group assigned
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Not a parent, no active subscription, or child does not belong to parent
+        '404':
+          description: Bundle not found
 
   /homework/parent/marketplace/access:
     get:

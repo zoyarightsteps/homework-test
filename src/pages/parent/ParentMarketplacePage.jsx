@@ -4,6 +4,7 @@ import {
   browseSubjects,
   browseTopics,
   browseSubtopics,
+  browseBundles,
   getPrice,
   getPreview,
   getCart,
@@ -20,7 +21,10 @@ import Modal from '../../components/ui/Modal';
 import { Select } from '../../components/ui/Field';
 import EmptyState from '../../components/ui/EmptyState';
 import Spinner from '../../components/ui/Spinner';
+import Pagination from '../../components/ui/Pagination';
 import ReviewsPanel from '../../components/marketplace/ReviewsPanel';
+import BundleCard from '../../components/marketplace/BundleCard';
+import BundleDetailModal from '../../components/marketplace/BundleDetailModal';
 
 function formatPence(p) {
   return p != null ? `£${(p / 100).toFixed(2)}` : '—';
@@ -84,6 +88,15 @@ export default function ParentMarketplacePage() {
   const [preview, setPreview] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [openReviewsFor, setOpenReviewsFor] = useState(null);
+
+  const [bundles, setBundles] = useState([]);
+  const [bundlesPagination, setBundlesPagination] = useState({});
+  const [bundlesLoading, setBundlesLoading] = useState(false);
+  const [bundlesPage, setBundlesPage] = useState(1);
+  const [bundlesSort, setBundlesSort] = useState('popular');
+  const [bundlesType, setBundlesType] = useState('');
+  const [bundlesSubjectId, setBundlesSubjectId] = useState('');
+  const [openBundle, setOpenBundle] = useState(null);
 
   const selectedChild = children.find((c) => c.id === childId);
   const yearGroupId = selectedChild?.yearGroupId;
@@ -151,6 +164,34 @@ export default function ParentMarketplacePage() {
       .catch(() => setSubtopicPrice(null));
   }, [subTopicId, yearGroupId]);
 
+  useEffect(() => {
+    setBundlesPage(1);
+  }, [childId, bundlesSort, bundlesType, bundlesSubjectId]);
+
+  useEffect(() => {
+    if (!childId) {
+      setBundles([]);
+      setBundlesPagination({});
+      return;
+    }
+    setBundlesLoading(true);
+    browseBundles({
+      childId,
+      bundleType: bundlesType || undefined,
+      subjectId: bundlesSubjectId || undefined,
+      sortBy: bundlesSort,
+      page: bundlesPage,
+      limit: 12,
+    })
+      .then((data) => {
+        setBundles(data.items || []);
+        setBundlesPagination(data.pagination || {});
+      })
+      .catch((err) => toast.error(getErrorMessage(err)))
+      .finally(() => setBundlesLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [childId, bundlesSort, bundlesType, bundlesSubjectId, bundlesPage]);
+
   function refreshCart() {
     setLoadingCart(true);
     getCart()
@@ -213,6 +254,61 @@ export default function ParentMarketplacePage() {
     <div>
       <h1 className="mb-1 text-lg font-bold text-slate-900">Question Bank Marketplace</h1>
       <p className="mb-5 text-sm text-slate-500">Buy access to extra practice questions for a child.</p>
+
+      <Card className="mb-5 space-y-4 p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-sm font-semibold text-slate-800">Browse Bundles</h2>
+          {childId && (
+            <div className="flex items-center gap-2">
+              <Select value={bundlesSubjectId} onChange={(e) => setBundlesSubjectId(e.target.value)}>
+                <option value="">All subjects</option>
+                {subjects.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </Select>
+              <Select value={bundlesType} onChange={(e) => setBundlesType(e.target.value)}>
+                <option value="">All types</option>
+                <option value="SUBTOPIC">Subtopic</option>
+                <option value="TOPIC">Topic</option>
+                <option value="SUBJECT">Subject</option>
+              </Select>
+              <Select value={bundlesSort} onChange={(e) => setBundlesSort(e.target.value)}>
+                <option value="popular">Most popular</option>
+                <option value="rating">Top rated</option>
+                <option value="price_low">Price: low to high</option>
+                <option value="price_high">Price: high to low</option>
+                <option value="name">Name</option>
+              </Select>
+            </div>
+          )}
+        </div>
+
+        {!childId ? (
+          <EmptyState title="Select a child above to browse bundles" />
+        ) : bundlesLoading ? (
+          <div className="flex items-center justify-center gap-2 py-10 text-slate-400">
+            <Spinner /> Loading bundles…
+          </div>
+        ) : bundles.length === 0 ? (
+          <EmptyState title="No bundles found" subtitle="Try a different type filter." />
+        ) : (
+          <>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {bundles.map((b) => (
+                <BundleCard key={`${b.bundleType}:${b.entityId}`} bundle={b} onOpen={() => setOpenBundle(b)} />
+              ))}
+            </div>
+            <Pagination
+              page={bundlesPagination.page || bundlesPage}
+              hasNextPage={(bundlesPagination.page || bundlesPage) < (bundlesPagination.totalPages || 1)}
+              total={bundlesPagination.total}
+              onChange={setBundlesPage}
+            />
+          </>
+        )}
+      </Card>
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         <Card className="space-y-4 p-5 lg:col-span-2">
@@ -387,6 +483,25 @@ export default function ParentMarketplacePage() {
           </div>
         ) : null}
       </Modal>
+
+      {openBundle && (
+        <BundleDetailModal
+          bundleType={openBundle.bundleType}
+          entityId={openBundle.entityId}
+          childId={childId}
+          onClose={() => setOpenBundle(null)}
+          onAddToCart={(type, entityId) => {
+            handleAddToCart(type, entityId);
+            setOpenBundle(null);
+          }}
+          onOpenBundle={(type, entityId) => setOpenBundle({ bundleType: type, entityId })}
+          onBrowseSubjectTopics={(subjectIdToFilter) => {
+            setBundlesType('TOPIC');
+            setBundlesSubjectId(subjectIdToFilter);
+            setOpenBundle(null);
+          }}
+        />
+      )}
     </div>
   );
 }
